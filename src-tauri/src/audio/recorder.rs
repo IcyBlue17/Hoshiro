@@ -46,6 +46,8 @@ pub struct StopResult {
 pub trait RecorderSink: Send + Sync {
     fn on_level(&self, level: f32);
     fn on_chunk(&self, chunk: AudioChunk);
+    /// Live PCM before pause-based chunking; default keeps batch recognizers unchanged.
+    fn on_pcm(&self, _samples: &[i16]) {}
     /// The input device failed mid-recording (unplugged, etc.). Audio captured so far is still
     /// returned by `stop()`. Called from the worker thread.
     fn on_error(&self, _message: &str) {}
@@ -168,7 +170,9 @@ impl Processor {
     }
 
     fn push_16k(&mut self, samples: &[f32]) {
-        self.frame_buf.extend(samples.iter().map(|&s| f32_to_i16(s)));
+        let pcm: Vec<i16> = samples.iter().map(|&s| f32_to_i16(s)).collect();
+        self.sink.on_pcm(&pcm);
+        self.frame_buf.extend(pcm);
         while self.frame_buf.len() >= FRAME {
             let frame: Vec<i16> = self.frame_buf.drain(..FRAME).collect();
             self.analyze_frame(frame);

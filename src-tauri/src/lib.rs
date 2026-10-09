@@ -13,6 +13,8 @@ mod db;
 mod importer;
 mod notify;
 mod pipeline;
+mod personalize;
+mod usage;
 mod state;
 mod stats;
 mod tray;
@@ -214,6 +216,8 @@ fn setup(app: &mut tauri::App, autostart_launch: bool) -> Result<(), Box<dyn std
     }
     spawn_permission_watcher(&handle);
     spawn_hourly_purge(&handle);
+    usage::init(&handle);
+    personalize::spawn(&handle);
     spawn_typeless_notice(&handle);
     state::apply_autostart(&handle, settings.launch_at_login);
     Ok(())
@@ -276,6 +280,11 @@ pub fn run() {
             commands::delete_dictionary_words,
             commands::preview_dictionary_csv,
             commands::get_stats,
+            commands::get_usage,
+            commands::get_profile,
+            commands::run_personalization,
+            commands::update_profile,
+            commands::reset_profile,
             commands::test_asr,
             commands::test_llm,
             commands::list_models,

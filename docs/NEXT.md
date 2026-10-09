@@ -1,4 +1,6 @@
-# 待办：AI 个性化学习 + 长文本整理
+# 交接：AI 个性化学习、长文本整理与语音服务
+
+2026-10-09 更新：下面的核心功能已实现，当前实现、统计口径、SDK 调研与验证边界见 [IMPLEMENTATION.md](IMPLEMENTATION.md)。原清单保留供对照；真实服务账号验证、macOS 实机验收和 macOS 安装包仍需相应环境。
 
 给接手的 AI / 开发者看的。先读 `SPEC.md` 了解整体架构。
 
@@ -17,7 +19,7 @@
   ```
 - 只能构建本机系统对应的平台：Mac 上只出 macOS 的 dmg。Windows（msi / nsis）和 Linux（deb / rpm / AppImage）需要在对应系统上构建，没有条件就先只发 macOS，并在 release 说明里注明
 - **签名**：`tauri.conf.json` 里是 `signingIdentity: "-"`（ad-hoc 签名），不要把个人证书写进仓库。本机想用固定证书（避免每次重新编译都要重新授权辅助功能），用环境变量覆盖：`APPLE_SIGNING_IDENTITY="Apple Development: ..." bun run tauri build`
-- **未推送的改动**：以下几处本地已改好，发版前请一起提交：
+- **上一轮遗留改动**：以下内容已经包含在 `78cdaf0`，无需重复提交：
   - Windows 打包缺 `.ico` 的修复（`tauri.conf.json`）
   - 个性化的契约层（`types.ts` / `types.rs` / `ipc.ts` / `mock.ts`）
   - 本文档
@@ -34,7 +36,7 @@
 - `src/lib/ipc.ts`：`getProfile` / `runPersonalization` / `updateProfile(profile)` / `resetProfile`
 - `src/lib/mock.ts`：这四个命令的假数据（浏览器里可以直接做 UI）
 
-### 还没做的
+### 原始实现清单（核心功能现已实现）
 
 **1. 采集修改对（升级 `autodict.rs` + `pipeline.rs::spawn_auto_dictionary`）**
 - 粘贴后在 3s / 10s / 30s 各读一次 `context::focused_text_value()`，取最后一次还能用首尾锚点对上原文的版本

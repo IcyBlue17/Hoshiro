@@ -8,7 +8,7 @@ use crate::notify;
 use crate::platform::{context, insert, AppContext};
 use crate::providers::{self, RewriteOutcome, RewriteRequest};
 use crate::state::{emit_history_changed, AppState};
-use crate::types::{events, AskAnswer, MimoAsrConfig, Mode, Settings};
+use crate::types::{events, AskAnswer, AsrConfig, Mode, Settings};
 use crate::{autodict, config, stats};
 use std::io::Write;
 use std::path::Path;
@@ -44,8 +44,9 @@ pub fn err_text(e: &anyhow::Error) -> String {
 // ───────────────────────── ASR ─────────────────────────
 
 pub fn spawn_asr(
-    cfg: MimoAsrConfig,
+    cfg: AsrConfig,
     language: &'static str,
+    words: Vec<String>,
     samples: Vec<i16>,
     tag: String,
 ) -> JoinHandle<anyhow::Result<String>> {
@@ -56,7 +57,8 @@ pub fn spawn_asr(
             .await
             .map_err(|e| anyhow::anyhow!("音频编码失败：{e}"))?;
         let t = Instant::now();
-        let r = providers::transcribe(&cfg, wav_bytes, language).await;
+        use crate::providers::asr::BatchRecognizer;
+        let r = cfg.recognize(wav_bytes, language, &words).await;
         match &r {
             Ok(text) => log::debug!(
                 "[{tag}] asr chunk {secs:.1}s -> {} chars in {} ms",
@@ -123,15 +125,20 @@ pub fn split_samples(samples: &[i16]) -> Vec<Vec<i16>> {
     out
 }
 
-async fn transcribe_samples(settings: &Settings, samples: &[i16], tag: &str) -> anyhow::Result<String> {
+async fn transcribe_samples(app: &AppHandle, settings: &Settings, samples: &[i16], tag: &str) -> anyhow::Result<String> {
     let language = config::asr_language(settings);
+    let words = app.state::<AppState>().db.words_for_prompt(100)?;
+    if settings.asr.streaming() {
+        return providers::streaming::transcribe_samples(settings.asr.clone(), settings.selected_languages.clone(), words, samples.to_vec()).await;
+    }
     let handles: Vec<_> = split_samples(samples)
         .into_iter()
         .enumerate()
-        .map(|(i, s)| spawn_asr(settings.asr.mimo.clone(), language, s, format!("{tag}#{i}")))
+        .map(|(i, s)| spawn_asr(settings.asr.clone(), language, words.clone(), s, format!("{tag}#{i}")))
         .collect();
+    let mut handles = TranscriptTasks(handles.into_iter().enumerate().collect());
     let mut parts = Vec::new();
-    for h in handles {
+    for (_, h) in &mut handles.0 {
         parts.push(h.await.map_err(|e| anyhow::anyhow!("识别任务异常：{e}"))??);
     }
     Ok(join_transcripts(&parts))
@@ -203,6 +210,14 @@ pub async fn deliver_text(start_ctx: &AppContext, text: &str, replace: bool) -> 
 
 // ───────────────────────── the pipeline ─────────────────────────
 
+/// Dropping/canceling a pipeline also cancels its in-flight provider tasks.
+struct TranscriptTasks(Vec<(usize, JoinHandle<anyhow::Result<String>>)>);
+impl Drop for TranscriptTasks {
+    fn drop(&mut self) {
+        for (_, task) in &self.0 { task.abort(); }
+    }
+}
+
 pub enum Transcripts {
     /// Chunk transcriptions already running (index, handle), tail included.
     Live(Vec<(usize, JoinHandle<anyhow::Result<String>>)>),
@@ -257,6 +272,7 @@ async fn rewrite_stage(
     raw: &str,
     ctx: &AppContext,
     selected: Option<String>,
+    duration_secs: f64,
 ) -> Result<Stage, String> {
     let ep = settings.llm.active_endpoint();
     let have_llm = settings.llm.enabled && !ep.api_key.trim().is_empty();
@@ -284,8 +300,10 @@ async fn rewrite_stage(
         translation_target: (mode == Mode::Translation).then(|| settings.translation_targets.first().cloned()).flatten(),
         custom_instructions: settings.style.custom_instructions.clone(),
         smart_formatting: settings.style.smart_formatting,
+        profile: if settings.style.ai_personalization { app.state::<AppState>().db.profile().ok() } else { None },
+        duration_secs,
     };
-    let limit = Duration::from_secs(settings.llm.timeout_secs as u64 + 8);
+    let limit = Duration::from_secs(settings.llm.timeout_secs as u64 + (duration_secs / 60.0 * 6.0).ceil() as u64 + 8);
     let result = match tokio::time::timeout(limit, providers::rewrite(&settings.llm, &req)).await {
         Ok(r) => r,
         Err(_) => Err(anyhow::anyhow!("改写超时")),
@@ -345,10 +363,11 @@ pub async fn run(app: AppHandle, input: ProcessInput) -> Report {
 
     // 1. transcript
     let raw = match transcripts {
-        Transcripts::Live(mut handles) => {
-            handles.sort_by_key(|(i, _)| *i);
+        Transcripts::Live(handles) => {
+            let mut handles = TranscriptTasks(handles);
+            handles.0.sort_by_key(|(i, _)| *i);
             let mut parts = Vec::new();
-            for (i, h) in handles {
+            for (i, h) in &mut handles.0 {
                 match h.await {
                     Ok(Ok(t)) => parts.push(t),
                     Ok(Err(e)) => return fail(&app, row, err_text(&e), deliver, store).await,
@@ -358,7 +377,7 @@ pub async fn run(app: AppHandle, input: ProcessInput) -> Report {
             }
             join_transcripts(&parts)
         }
-        Transcripts::Samples(samples) => match transcribe_samples(&settings, &samples, &tag).await {
+        Transcripts::Samples(samples) => match transcribe_samples(&app, &settings, &samples, &tag).await {
             Ok(t) => t,
             Err(e) => return fail(&app, row, err_text(&e), deliver, store).await,
         },
@@ -377,7 +396,7 @@ pub async fn run(app: AppHandle, input: ProcessInput) -> Report {
 
     // 2. rewrite
     let t1 = Instant::now();
-    let stage = match rewrite_stage(&app, &settings, mode, &raw, &ctx, row.selected_text.clone()).await {
+    let stage = match rewrite_stage(&app, &settings, mode, &raw, &ctx, row.selected_text.clone(), row.duration_secs).await {
         Ok(s) => s,
         Err(msg) => return fail(&app, row, msg, deliver, store).await,
     };
@@ -446,32 +465,45 @@ pub async fn run(app: AppHandle, input: ProcessInput) -> Report {
     );
 
     // 5. auto-dictionary
-    if inserted && mode == Mode::Dictation && settings.style.auto_add_dictionary {
-        spawn_auto_dictionary(&app, stage.text.clone());
+    if inserted && mode == Mode::Dictation && (settings.style.auto_add_dictionary || settings.style.ai_personalization) {
+        spawn_auto_dictionary(&app, stage.text.clone(), row.id.clone(), row.app_name.clone(), ctx.pid, store);
     }
     Report { row }
 }
 
-fn spawn_auto_dictionary(app: &AppHandle, inserted: String) {
+fn spawn_auto_dictionary(app: &AppHandle, inserted: String, id: String, app_name: Option<String>, pid: Option<i32>, store: bool) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(8)).await;
-        let field = tauri::async_runtime::spawn_blocking(context::focused_text_value).await.ok().flatten();
-        let Some(field) = field else { return };
-        let Some(word) = autodict::detect_correction(&inserted, &field) else { return };
-        let db = app.state::<AppState>().db.clone();
-        let w = word.clone();
-        let added = tauri::async_runtime::spawn_blocking(move || db.add_words(&[w], "auto")).await;
-        match added {
-            Ok(Ok(v)) if !v.is_empty() => {
-                log::info!("auto-dictionary learned a word ({} chars)", word.chars().count());
-                emit_history_changed(&app);
-                notify::alert("dictionary_added", format!("“{word}” 已添加到您的词典"), "success")
-                    .duration(Some(3500))
-                    .show(&app);
+        let mut latest = None;
+        for wait in [3, 7, 20] {
+            tokio::time::sleep(Duration::from_secs(wait)).await;
+            let field = tauri::async_runtime::spawn_blocking(move || {
+                let current = context::capture(false, false);
+                if pid.is_some() && current.pid != pid { return None; }
+                context::focused_text_value()
+            }).await.ok().flatten();
+            let Some(field) = field else { continue };
+            let Some(region) = autodict::edited_region(&inserted, &field) else { continue };
+            latest = Some(region.clone());
+            let state = app.state::<AppState>();
+            if state.settings.read().style.auto_add_dictionary {
+                if let Some(word) = autodict::detect_correction(&inserted, &region) {
+                    if state.db.add_words(&[word.clone()], "auto").is_ok_and(|v| !v.is_empty()) {
+                        emit_history_changed(&app);
+                        notify::alert("dictionary_added", format!("“{word}” 已添加到您的词典"), "success")
+                            .duration(Some(3500)).show(&app);
+                    }
+                }
             }
-            Ok(Err(e)) => log::debug!("auto-dictionary skipped: {e:#}"),
-            _ => {}
+        }
+        let state = app.state::<AppState>();
+        let settings = state.settings();
+        if store && settings.history_retention != "never" && settings.style.ai_personalization {
+            if let Some(final_text) = latest.filter(|text| text != &inserted) {
+                if let Err(e) = state.db.save_edit(&id, &inserted, &final_text, app_name.as_deref()) {
+                    log::debug!("cannot save edit: {e:#}");
+                }
+            }
         }
     });
 }

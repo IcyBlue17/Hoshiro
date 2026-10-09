@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, listen } from "../lib/ipc";
 import { EVENTS, type Settings } from "../lib/types";
 
-export type Page = "home" | "history" | "dictionary";
+export type Page = "home" | "history" | "dictionary" | "statistics";
 export type SettingsCategory =
   | "general"
   | "shortcuts"

@@ -44,6 +44,7 @@ export function TextField({
   width,
   type = "text",
   disabled,
+  label,
 }: {
   value: string;
   onCommit: (v: string) => void;
@@ -52,10 +53,12 @@ export function TextField({
   width?: number | string;
   type?: "text" | "number";
   disabled?: boolean;
+  label?: string;
 }) {
   const [local, setLocal] = useDebouncedField(value, onCommit);
   return (
     <input
+      aria-label={label}
       className={`input ${mono ? "mono" : ""}`}
       style={{ width }}
       type={type}
@@ -76,18 +79,21 @@ export function SecretInput({
   placeholder = "粘贴 API Key",
   width,
   disabled,
+  label,
 }: {
   value: string;
   onCommit: (v: string) => void;
   placeholder?: string;
   width?: number | string;
   disabled?: boolean;
+  label?: string;
 }) {
   const [local, setLocal] = useDebouncedField(value, onCommit);
   const [show, setShow] = useState(false);
   return (
     <div className="input-wrap" style={{ width }}>
       <input
+        aria-label={label}
         className="input mono"
         type={show ? "text" : "password"}
         value={local}

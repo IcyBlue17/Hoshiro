@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { api } from "../../lib/ipc";
-import type { LlmProvider } from "../../lib/types";
+import type { AsrConfig, LlmProvider } from "../../lib/types";
 import { useApp } from "../store";
 import { Popover, Segmented, Switch } from "../ui";
 import { Group, Row, SecretInput, TestButton, TextField, useTester } from "./shared";
@@ -11,7 +11,56 @@ export const MIMO_CN = "https://token-plan-cn.xiaomimimo.com/v1";
 
 type Region = "global" | "cn" | "custom";
 
+export const ASR_NAMES = { mimo: "MiMo", cloudflare: "Cloudflare", azure: "Azure", google: "Google" };
+export function asrReady(asr: AsrConfig) {
+  if (asr.provider === "google") return !!asr.google.projectId.trim() && !!(asr.google.apiKey.trim() || asr.google.serviceAccountJson.trim());
+  if (asr.provider === "cloudflare") return !!asr.cloudflare.apiKey.trim() && !!asr.cloudflare.accountId.trim();
+  if (asr.provider === "azure") return !!asr.azure.apiKey.trim() && !!asr.azure.region.trim();
+  return !!asr.mimo.apiKey.trim();
+}
+
 export function AsrForm() {
+  const { settings, update } = useApp();
+  return <>
+    <Group title="语音识别"><Row title="服务商" stacked>
+      <Segmented id="asr-provider" value={settings.asr.provider} onChange={(v) => update((d) => void (d.asr.provider = v))}
+        options={Object.entries(ASR_NAMES).map(([value, label]) => ({ value: value as AsrConfig["provider"], label }))} />
+    </Row></Group>
+    {settings.asr.provider === "mimo" ? <MimoForm /> : <OtherAsrForm key={settings.asr.provider} />}
+  </>;
+}
+
+function OtherAsrForm() {
+  const { settings, update } = useApp();
+  const provider = settings.asr.provider;
+  const tester = useTester(() => api.testAsr(settings.asr));
+  const c = settings.asr;
+  return <Group title={`语音识别 · ${ASR_NAMES[provider]}`}>
+    {provider === "cloudflare" && <>
+      <Row title="账户 ID"><TextField label="Cloudflare 账户 ID" value={c.cloudflare.accountId} onCommit={(v) => update((d) => void (d.asr.cloudflare.accountId = v.trim()))} width={300} /></Row>
+      <Row title="API Token" desc="需要 Workers AI 读取/运行权限。"><SecretInput label="Cloudflare API Token" value={c.cloudflare.apiKey} onCommit={(v) => update((d) => void (d.asr.cloudflare.apiKey = v.trim()))} width={300} /></Row>
+      <Row title="Whisper 模型"><TextField label="Cloudflare 模型" value={c.cloudflare.model} onCommit={(v) => update((d) => void (d.asr.cloudflare.model = v.trim()))} width={300} /></Row>
+    </>}
+    {provider === "azure" && <>
+      <Row title="Speech Key"><SecretInput label="Azure Speech Key" value={c.azure.apiKey} onCommit={(v) => update((d) => void (d.asr.azure.apiKey = v.trim()))} width={300} /></Row>
+      <Row title="区域" desc="须与 Speech 资源区域一致，例如 eastasia。"><TextField label="Azure 区域" value={c.azure.region} onCommit={(v) => update((d) => void (d.asr.azure.region = v.trim()))} width={300} /></Row>
+      <Row title="实时识别" desc="边说边发送音频，使用词典提示；多语言从听写语言中取前 4 种。" />
+    </>}
+    {provider === "google" && <>
+      <Row title="项目 ID"><TextField label="Google 项目 ID" value={c.google.projectId} onCommit={(v) => update((d) => void (d.asr.google.projectId = v.trim()))} width={300} /></Row>
+      <Row title="区域" desc="区域须支持所选模型，例如 global、us 或 eu。"><TextField label="Google 区域" value={c.google.location} onCommit={(v) => update((d) => void (d.asr.google.location = v.trim()))} width={300} /></Row>
+      <Row title="模型"><TextField label="Google 模型" value={c.google.model} onCommit={(v) => update((d) => void (d.asr.google.model = v.trim()))} width={300} /></Row>
+      <Row title="API Key" desc="使用服务账户时可留空；项目需已启用 Speech-to-Text。"><SecretInput label="Google API Key" value={c.google.apiKey} onCommit={(v) => update((d) => void (d.asr.google.apiKey = v.trim()))} width={300} /></Row>
+      <Row title="服务账户 JSON" desc="与 API Key 二选一，填写后优先使用服务账户；仅保存在本机。" stacked>
+        <SecretInput label="Google 服务账户 JSON" value={c.google.serviceAccountJson} onCommit={(v) => update((d) => void (d.asr.google.serviceAccountJson = v.trim()))} width={400} placeholder="粘贴服务账户 JSON" />
+      </Row>
+      <Row title="实时识别" desc="使用 Google 官方 SDK，支持词典提示；多语言取听写语言中的前 3 种，具体支持取决于所选模型和区域。" />
+    </>}
+    <Row title="连接测试" desc="发送一小段静音验证配置，可能产生少量用量。"><TestButton tester={tester} disabled={!asrReady(c)} /></Row>
+  </Group>;
+}
+
+function MimoForm() {
   const { settings, update } = useApp();
   const mimo = settings.asr.mimo;
   const known: Region | null = mimo.baseUrl === MIMO_GLOBAL ? "global" : mimo.baseUrl === MIMO_CN ? "cn" : null;

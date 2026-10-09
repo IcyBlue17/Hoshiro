@@ -8,15 +8,24 @@
 //! It shows the panel, moves the mouse over / away from the pill and prints whether the window toggled click-through,
 //! plus the frontmost app before/after (must not change).
 
+#[cfg(target_os = "macos")]
 use core_graphics::display::CGDisplay;
+#[cfg(target_os = "macos")]
 use core_graphics::geometry::CGPoint;
+#[cfg(target_os = "macos")]
 use hoshiro_lib::platform::bar;
+#[cfg(target_os = "macos")]
 use hoshiro_lib::types::HitRect;
+#[cfg(target_os = "macos")]
 use objc2::msg_send;
+#[cfg(target_os = "macos")]
 use objc2::runtime::AnyObject;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
+#[cfg(target_os = "macos")]
 use tauri::Manager;
 
+#[cfg(target_os = "macos")]
 fn on_main<T: Send + 'static>(app: &tauri::AppHandle, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     let (tx, rx) = std::sync::mpsc::channel();
     app.run_on_main_thread(move || {
@@ -26,6 +35,7 @@ fn on_main<T: Send + 'static>(app: &tauri::AppHandle, f: impl FnOnce() -> T + Se
     rx.recv_timeout(Duration::from_secs(3)).ok()
 }
 
+#[cfg(target_os = "macos")]
 fn frontmost() -> String {
     use objc2_app_kit::NSWorkspace;
     NSWorkspace::sharedWorkspace()
@@ -34,6 +44,7 @@ fn frontmost() -> String {
         .unwrap_or_else(|| "none".into())
 }
 
+#[cfg(target_os = "macos")]
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -105,4 +116,9 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("tauri");
+}
+
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("此诊断工具需要在 macOS 上运行。");
 }

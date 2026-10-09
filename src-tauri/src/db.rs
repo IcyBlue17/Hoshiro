@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::path::{Path, PathBuf};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -137,6 +137,28 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
              COMMIT;",
         )?;
         version = 1;
+    }
+    if version < 2 {
+        conn.execute_batch("BEGIN;
+            CREATE TABLE edits (
+                history_id TEXT PRIMARY KEY, inserted TEXT NOT NULL, final_text TEXT NOT NULL,
+                app_name TEXT, created_at TEXT NOT NULL
+            );
+            CREATE TABLE personal_profile (id INTEGER PRIMARY KEY CHECK(id = 1), data TEXT NOT NULL);
+            CREATE TABLE analyzed_sessions (history_id TEXT PRIMARY KEY);
+            CREATE TABLE usage (
+                id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, provider TEXT NOT NULL,
+                model TEXT NOT NULL, input_tokens INTEGER, output_tokens INTEGER,
+                audio_secs REAL NOT NULL DEFAULT 0
+            );
+            CREATE INDEX idx_usage_created_at ON usage(created_at);
+            CREATE TRIGGER history_cleanup AFTER DELETE ON history BEGIN
+                DELETE FROM edits WHERE history_id = OLD.id;
+                DELETE FROM analyzed_sessions WHERE history_id = OLD.id;
+            END;
+            PRAGMA user_version = 2;
+            COMMIT;")?;
+        version = 2;
     }
     debug_assert_eq!(version, SCHEMA_VERSION);
     Ok(())
@@ -348,6 +370,123 @@ impl Db {
         }
     }
 
+    pub fn save_edit(&self, id: &str, inserted: &str, final_text: &str, app: Option<&str>) -> anyhow::Result<()> {
+        self.conn.lock().execute(
+            "INSERT INTO edits SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS(SELECT 1 FROM history WHERE id = ?1)
+             ON CONFLICT(history_id) DO UPDATE SET final_text=excluded.final_text, created_at=excluded.created_at",
+            params![id, inserted, final_text, app, now_ts()],
+        )?;
+        Ok(())
+    }
+
+    pub fn profile(&self) -> anyhow::Result<crate::types::PersonalProfile> {
+        let conn = self.conn.lock();
+        let data: Option<String> = conn.query_row("SELECT data FROM personal_profile WHERE id=1", [], |r| r.get(0)).optional()?;
+        let mut p = data.map(|s| serde_json::from_str::<crate::types::PersonalProfile>(&s)).transpose()?.unwrap_or_default();
+        p.pending_sessions = conn.query_row(
+            "SELECT COUNT(*) FROM history h WHERE status='completed' AND mode <> 'ask'
+             AND raw_text IS NOT NULL AND NOT EXISTS(SELECT 1 FROM analyzed_sessions a WHERE a.history_id=h.id)", [], |r| r.get(0))?;
+        Ok(p)
+    }
+
+    pub fn save_profile(&self, p: &crate::types::PersonalProfile, ids: &[String]) -> anyhow::Result<()> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        tx.execute("INSERT OR REPLACE INTO personal_profile VALUES(1, ?1)", [serde_json::to_string(p)?])?;
+        for id in ids {
+            tx.execute("INSERT OR IGNORE INTO analyzed_sessions VALUES(?1)", [id])?;
+        }
+        if !ids.is_empty() {
+            for word in &p.vocabulary {
+                tx.execute("INSERT OR IGNORE INTO dictionary (id, word, source, created_at) VALUES (?1, ?2, 'auto', ?3)",
+                    params![uuid::Uuid::new_v4().to_string(), word, now_ts()])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn reset_profile(&self) -> anyhow::Result<()> {
+        self.conn.lock().execute_batch("BEGIN; DELETE FROM personal_profile; DELETE FROM analyzed_sessions; COMMIT;")?;
+        Ok(())
+    }
+
+    /// Newest completed dictations first; include only whole records within the character budget.
+    pub fn learning_samples(&self) -> anyhow::Result<Vec<(String, serde_json::Value)>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare("SELECT h.id, h.app_name, h.raw_text, h.refined_text, e.inserted, e.final_text
+            FROM history h LEFT JOIN edits e ON e.history_id=h.id
+            WHERE h.status='completed' AND h.mode <> 'ask' AND h.raw_text IS NOT NULL
+            ORDER BY EXISTS(SELECT 1 FROM analyzed_sessions a WHERE a.history_id=h.id), h.created_at DESC, h.id DESC LIMIT 500")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, serde_json::json!({
+            "app": r.get::<_, Option<String>>(1)?, "raw": r.get::<_, String>(2)?,
+            "final": r.get::<_, Option<String>>(3)?, "inserted": r.get::<_, Option<String>>(4)?,
+            "user_final": r.get::<_, Option<String>>(5)?
+        }))))?;
+        let mut out = Vec::new();
+        let mut size = 0;
+        for row in rows {
+            let row = row?;
+            let n = row.1.to_string().chars().count();
+            if size + n > 55_000 { continue; }
+            size += n;
+            out.push(row);
+        }
+        Ok(out)
+    }
+
+    pub fn usage_stats(&self, days: u32) -> anyhow::Result<crate::types::UsageStats> {
+        use crate::types::{UsageBucket, UsageStats};
+        use std::collections::BTreeMap;
+        let cutoff = if days == 0 { String::new() } else {
+            (chrono::Local::now().date_naive() - chrono::Duration::days(days.min(366) as i64 - 1)).to_string()
+        };
+        let conn = self.conn.lock();
+        let mut stats = UsageStats::default();
+        let (mut daily, mut modes, mut apps, mut providers) = (BTreeMap::<String, UsageBucket>::new(), BTreeMap::<String, UsageBucket>::new(), BTreeMap::<String, UsageBucket>::new(), BTreeMap::<String, UsageBucket>::new());
+        let mut stmt = conn.prepare("SELECT created_at, mode, status, duration_secs, words, COALESCE(app_name, '未知应用') FROM history")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, f64>(3)?, r.get::<_, u64>(4)?, r.get::<_, String>(5)?)))?;
+        for row in rows {
+            let (ts, mode, status, audio, words, app) = row?;
+            let date = DateTime::parse_from_rfc3339(&ts)?.with_timezone(&chrono::Local).date_naive().to_string();
+            if date < cutoff { continue; }
+            stats.total.sessions += 1;
+            stats.error_sessions += u64::from(status == "error");
+            if status != "completed" { continue; }
+            stats.completed_sessions += 1;
+            for bucket in [&mut stats.total, daily.entry(date.clone()).or_default(), modes.entry(mode.clone()).or_default(), apps.entry(app.clone()).or_default()] {
+                bucket.words += words; bucket.audio_secs += audio;
+            }
+            daily.get_mut(&date).unwrap().sessions += 1;
+            modes.get_mut(&mode).unwrap().sessions += 1;
+            apps.get_mut(&app).unwrap().sessions += 1;
+        }
+        let mut stmt = conn.prepare("SELECT created_at,provider,model,input_tokens,output_tokens,audio_secs FROM usage")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<u64>>(3)?, r.get::<_, Option<u64>>(4)?, r.get::<_, f64>(5)?)))?;
+        for row in rows {
+            let (ts, provider, model, input, output, audio) = row?;
+            let date = DateTime::parse_from_rfc3339(&ts)?.with_timezone(&chrono::Local).date_naive().to_string();
+            if date < cutoff { continue; }
+            let provider = providers.entry(format!("{provider} · {model}")).or_default();
+            provider.audio_secs += audio;
+            for bucket in [&mut stats.total, daily.entry(date).or_default(), provider] {
+                bucket.requests += 1; bucket.input_tokens += input.unwrap_or(0); bucket.output_tokens += output.unwrap_or(0);
+                bucket.unreported_requests += u64::from(input.is_none() || output.is_none());
+            }
+        }
+        let buckets = |m: BTreeMap<String, UsageBucket>| m.into_iter().map(|(label, b)| UsageBucket { label, ..b }).collect::<Vec<_>>();
+        stats.days = buckets(daily); stats.modes = buckets(modes); stats.apps = buckets(apps); stats.providers = buckets(providers);
+        stats.apps.sort_by(|a,b| b.words.cmp(&a.words)); stats.apps.truncate(8);
+        (stats.dictionary_words, stats.auto_words) = conn.query_row("SELECT COUNT(*), COALESCE(SUM(source='auto'),0) FROM dictionary", [], |r| Ok((r.get(0)?,r.get(1)?)))?;
+        Ok(stats)
+    }
+
+    pub fn record_usage(&self, provider: &str, model: &str, input: Option<u64>, output: Option<u64>, audio: f64) -> anyhow::Result<()> {
+        self.conn.lock().execute("INSERT INTO usage(created_at,provider,model,input_tokens,output_tokens,audio_secs) VALUES(?1,?2,?3,?4,?5,?6)",
+            params![now_ts(), provider, model, input.map(|v| v as i64), output.map(|v| v as i64), audio])?;
+        Ok(())
+    }
+
     // ───────── dictionary ─────────
 
     pub fn list_words(&self) -> anyhow::Result<Vec<DictionaryWord>> {
@@ -425,7 +564,10 @@ fn collect_audio(conn: &Connection, sql: &str, p: impl rusqlite::Params) -> anyh
 fn upsert(conn: &Connection, row: &HistoryRow) -> anyhow::Result<()> {
     conn.execute(
         &format!(
-            "INSERT OR REPLACE INTO history ({HISTORY_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"
+            "INSERT INTO history ({HISTORY_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15) \
+             ON CONFLICT(id) DO UPDATE SET status=excluded.status, raw_text=excluded.raw_text, \
+             refined_text=excluded.refined_text, error_message=excluded.error_message, \
+             audio_path=excluded.audio_path, words=excluded.words, duration_secs=excluded.duration_secs"
         ),
         params![
             row.id,
@@ -469,6 +611,89 @@ mod tests {
 
     fn q(mode: Option<Mode>, search: Option<&str>) -> HistoryQuery {
         HistoryQuery { mode, limit: 50, offset: 0, search: search.map(String::from) }
+    }
+
+    #[test]
+    fn learning_commit_rolls_back_profile_markers_and_vocabulary_together() {
+        let dir = tmp_dir();
+        let db = Db::open_in_memory(dir.clone()).unwrap();
+        db.upsert_history(&row("learn", Mode::Dictation, "completed", "hello", &now_ts())).unwrap();
+        db.conn.lock().execute_batch("CREATE TRIGGER reject_word BEFORE INSERT ON dictionary BEGIN SELECT RAISE(ABORT, 'test failure'); END;").unwrap();
+        let p = crate::types::PersonalProfile { vocabulary: vec!["Hoshiro".into()], ..Default::default() };
+        assert!(db.save_profile(&p, &["learn".into()]).is_err());
+        assert!(db.profile().unwrap().vocabulary.is_empty());
+        assert_eq!(db.profile().unwrap().pending_sessions, 1);
+        db.conn.lock().execute_batch("DROP TRIGGER reject_word;").unwrap();
+        db.save_profile(&p, &["learn".into()]).unwrap();
+        assert_eq!(db.profile().unwrap().pending_sessions, 0);
+        assert_eq!(db.words_for_prompt(10).unwrap(), vec!["Hoshiro"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn migration_preserves_history_and_edits_follow_retention() {
+        let dir = tmp_dir();
+        let db = Db::open_in_memory(dir.clone()).unwrap();
+        let mut h = row("learn", Mode::Dictation, "completed", "请使用 Hoshiro 输入文字", &now_ts());
+        db.upsert_history(&h).unwrap();
+        db.save_edit(&h.id, "请使用 Hoshira 输入文字", "请使用 Hoshiro 输入文字", Some("Notes")).unwrap();
+        let p = crate::types::PersonalProfile { analyzed_sessions: 1, ..Default::default() };
+        db.save_profile(&p, &[h.id.clone()]).unwrap();
+        assert_eq!(db.profile().unwrap().pending_sessions, 0);
+        h.refined_text = Some("retry".into());
+        db.upsert_history(&h).unwrap();
+        assert_eq!(db.learning_samples().unwrap()[0].1["user_final"], "请使用 Hoshiro 输入文字");
+        assert_eq!(db.profile().unwrap().pending_sessions, 0);
+        db.delete_history(&h.id).unwrap();
+        assert!(db.learning_samples().unwrap().is_empty());
+        assert_eq!(db.conn.lock().query_row("SELECT COUNT(*) FROM edits", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        db.save_edit(&h.id, "old", "late observation", None).unwrap();
+        assert_eq!(db.conn.lock().query_row("SELECT COUNT(*) FROM edits", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn upgrades_v1_without_losing_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE history(id TEXT PRIMARY KEY); INSERT INTO history VALUES('old'); PRAGMA user_version=1;").unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM history", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+    }
+
+    #[test]
+    fn usage_counts_retries_without_inflating_sessions_and_survives_history_deletion() {
+        let dir = tmp_dir();
+        let db = Db::open_in_memory(dir.clone()).unwrap();
+        let mut h = row("one", Mode::Dictation, "completed", "你好世界", &now_ts());
+        h.duration_secs = 12.0;
+        db.upsert_history(&h).unwrap(); db.upsert_history(&h).unwrap();
+        db.record_usage("MiMo", "asr", None, None, 12.0).unwrap();
+        db.record_usage("Gemini", "flash", Some(10), Some(20), 0.0).unwrap();
+        db.record_usage("Gemini", "flash", Some(30), Some(5), 0.0).unwrap();
+        let s = db.usage_stats(7).unwrap();
+        assert_eq!(s.completed_sessions, 1);
+        assert_eq!(s.total.requests, 3); assert_eq!(s.total.input_tokens, 40);
+        assert_eq!(s.total.output_tokens, 25); assert_eq!(s.total.unreported_requests, 1);
+        assert_eq!(s.total.audio_secs, 12.0);
+        db.delete_all_history().unwrap();
+        let s = db.usage_stats(0).unwrap();
+        assert_eq!(s.total.sessions, 0); assert_eq!(s.total.requests, 3);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn learning_budget_keeps_records_whole_and_excludes_ask() {
+        let dir = tmp_dir();
+        let db = Db::open_in_memory(dir.clone()).unwrap();
+        db.upsert_history(&row("ask", Mode::Ask, "completed", "question", &now_ts())).unwrap();
+        db.upsert_history(&row("large", Mode::Dictation, "completed", &"字".repeat(40_000), &now_ts())).unwrap();
+        db.upsert_history(&row("small", Mode::Dictation, "completed", "你好", &now_ts())).unwrap();
+        let samples = db.learning_samples().unwrap();
+        assert_eq!(samples.len(), 1); assert_eq!(samples[0].0, "small");
+        assert_eq!(db.profile().unwrap().pending_sessions, 2);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

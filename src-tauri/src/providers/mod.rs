@@ -1,5 +1,7 @@
 //! ASR + LLM providers. OWNER: audio/providers agent.
 
+pub mod asr;
+pub mod streaming;
 pub mod http;
 pub mod llm;
 pub mod mimo;

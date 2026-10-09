@@ -1,6 +1,7 @@
+import { ASR_NAMES, asrReady as isAsrReady } from "./settings/Providers";
 import { useState } from "react";
 import { motion } from "motion/react";
-import { AlertTriangle, BookOpen, CircleHelp, History, House, Settings as SettingsIcon } from "lucide-react";
+import { BarChart3, AlertTriangle, BookOpen, CircleHelp, History, House, Settings as SettingsIcon } from "lucide-react";
 import logo from "./assets/logo.png";
 import { type Page, useApp } from "./store";
 import { Modal, ModalHeader, ShortcutKeys } from "./ui";
@@ -10,6 +11,7 @@ const NAV: { page: Page; label: string; icon: typeof House }[] = [
   { page: "home", label: "首页", icon: House },
   { page: "history", label: "历史记录", icon: History },
   { page: "dictionary", label: "词典", icon: BookOpen },
+  { page: "statistics", label: "使用统计", icon: BarChart3 },
 ];
 
 const LLM_NAMES: Record<LlmProvider, string> = { gemini: "Gemini", anthropic: "Claude", openai: "OpenAI 兼容" };
@@ -18,11 +20,11 @@ export function Sidebar({ page }: { page: Page }) {
   const { navigate, openSettings, settings } = useApp();
   const [help, setHelp] = useState(false);
 
-  const asrReady = settings.asr.mimo.apiKey.trim().length > 0;
+  const asrReady = isAsrReady(settings.asr);
   const llm = settings.llm;
   const llmReady = !llm.enabled || llm[llm.provider].apiKey.trim().length > 0;
   const missing: string[] = [];
-  if (!asrReady) missing.push("MiMo ASR");
+  if (!asrReady) missing.push(ASR_NAMES[settings.asr.provider]);
   if (!llmReady) missing.push(LLM_NAMES[llm.provider]);
 
   return (
@@ -60,7 +62,7 @@ export function Sidebar({ page }: { page: Page }) {
           <span className="provider-key">语音识别</span>
           <span className="provider-val">
             <i className={`dot ${asrReady ? "ok" : "bad"}`} />
-            MiMo ASR
+            {ASR_NAMES[settings.asr.provider]}
           </span>
         </div>
         <div className="provider-line">

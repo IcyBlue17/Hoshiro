@@ -28,6 +28,8 @@ pub struct RewriteRequest {
     pub translation_target: Option<String>,
     pub custom_instructions: String,
     pub smart_formatting: bool,
+    pub profile: Option<crate::types::PersonalProfile>,
+    pub duration_secs: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -61,7 +63,7 @@ fn param_key(p: LlmProvider, model: &str, param: &str) -> String {
 
 /// Run the rewrite for the active provider in `cfg` (honours cfg.timeout_secs).
 pub async fn rewrite(cfg: &LlmConfig, req: &RewriteRequest) -> anyhow::Result<RewriteOutcome> {
-    let secs = cfg.timeout_secs.clamp(1, 120) as u64;
+    let secs = cfg.timeout_secs.clamp(1, 120) as u64 + (req.duration_secs / 60.0 * 6.0).ceil() as u64;
     match tokio::time::timeout(Duration::from_secs(secs), rewrite_with(cfg.provider, cfg.active_endpoint(), req, secs)).await {
         Ok(r) => r,
         Err(_) => Err(anyhow!("改写超时（{secs} 秒）")),
@@ -135,6 +137,9 @@ fn is_preface_line(line: &str) -> bool {
 /// Trim, drop wrapping quotes / code fences / tags / "以下是…：" prefaces.
 pub fn clean_output(raw: &str) -> String {
     let mut s = strip_code_fence(raw);
+    if s.starts_with("<analysis>") {
+        s = s.split_once("</analysis>").map(|(_, text)| text.trim().to_string()).unwrap_or_default();
+    }
     for tag in ["transcript", "output", "result", "text"] {
         let open = format!("<{tag}>");
         let close = format!("</{tag}>");
@@ -265,7 +270,7 @@ pub fn parse_ask(raw: &str, has_selection: bool) -> anyhow::Result<RewriteOutcom
 
 // ───────────────────────── Provider calls ─────────────────────────
 
-async fn complete(
+pub(crate) async fn complete(
     provider: LlmProvider,
     ep: &LlmEndpointConfig,
     system: &str,
@@ -305,7 +310,10 @@ async fn post_json(
     if !status.is_success() {
         return Err(status_failure(label, status.as_u16(), &text));
     }
-    serde_json::from_str(&text).map_err(|_| Failure { message: format!("{label} 返回了无法解析的响应"), retryable: false, status: None })
+    let v: Value = serde_json::from_str(&text).map_err(|_| Failure { message: format!("{label} 返回了无法解析的响应"), retryable: false, status: None })?;
+    let model = body.get("model").and_then(Value::as_str).unwrap_or_else(|| url.split("/models/").nth(1).unwrap_or("").split(':').next().unwrap_or(""));
+    crate::usage::record(label, model, &v, 0.0);
+    Ok(v)
 }
 
 fn mentions(failure: &Failure, body_hint: &str) -> bool {
@@ -588,6 +596,8 @@ pub async fn test_llm(provider: LlmProvider, cfg: &LlmEndpointConfig) -> TestRes
         translation_target: None,
         custom_instructions: String::new(),
         smart_formatting: true,
+        profile: None,
+        duration_secs: 0.0,
     };
     let start = Instant::now();
     let r = tokio::time::timeout(Duration::from_secs(20), rewrite_with(provider, cfg, &req, 20)).await;
@@ -605,6 +615,12 @@ pub async fn test_llm(provider: LlmProvider, cfg: &LlmEndpointConfig) -> TestRes
 mod tests {
     use super::*;
 
+    #[test]
+    fn analysis_draft_never_leaks_into_inserted_text() {
+        assert_eq!(clean_output("<analysis>outline</analysis>\n正文"), "正文");
+        assert_eq!(clean_output("<analysis>incomplete"), "");
+    }
+
     fn req(mode: Mode, transcript: &str) -> RewriteRequest {
         RewriteRequest {
             mode,
@@ -616,6 +632,8 @@ mod tests {
             translation_target: None,
             custom_instructions: String::new(),
             smart_formatting: true,
+            profile: None,
+            duration_secs: 0.0,
         }
     }
 

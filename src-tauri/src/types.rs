@@ -70,13 +70,16 @@ impl Default for MimoAsrConfig {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AsrConfig {
-    pub provider: String, // "mimo"
+    pub provider: String, // mimo | cloudflare | azure | google
     pub mimo: MimoAsrConfig,
+    pub cloudflare: CloudflareAsrConfig,
+    pub azure: AzureAsrConfig,
+    pub google: GoogleAsrConfig,
 }
 
 impl Default for AsrConfig {
     fn default() -> Self {
-        Self { provider: "mimo".into(), mimo: MimoAsrConfig::default() }
+        Self { provider: "mimo".into(), mimo: MimoAsrConfig::default(), cloudflare: CloudflareAsrConfig::default(), azure: AzureAsrConfig::default(), google: GoogleAsrConfig::default() }
     }
 }
 
@@ -446,4 +449,65 @@ pub mod events {
     pub const MIC_TEST_LEVEL: &str = "app://mic-test-level";
     pub const PERMISSIONS_CHANGED: &str = "app://permissions-changed";
     pub const PROFILE_UPDATED: &str = "app://profile-updated";
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageBucket {
+    pub label: String,
+    pub sessions: u64,
+    pub words: u64,
+    pub audio_secs: f64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub requests: u64,
+    pub unreported_requests: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageStats {
+    pub total: UsageBucket,
+    pub completed_sessions: u64,
+    pub error_sessions: u64,
+    pub dictionary_words: u64,
+    pub auto_words: u64,
+    pub days: Vec<UsageBucket>,
+    pub modes: Vec<UsageBucket>,
+    pub apps: Vec<UsageBucket>,
+    pub providers: Vec<UsageBucket>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CloudflareAsrConfig { pub account_id: String, pub api_key: String, pub model: String }
+impl Default for CloudflareAsrConfig {
+    fn default() -> Self { Self { account_id: String::new(), api_key: String::new(), model: "@cf/openai/whisper-large-v3-turbo".into() } }
+}
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AzureAsrConfig { pub api_key: String, pub region: String }
+impl Default for AzureAsrConfig {
+    fn default() -> Self { Self { api_key: String::new(), region: "eastasia".into() } }
+}
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GoogleAsrConfig {
+    pub api_key: String, pub service_account_json: String, pub project_id: String,
+    pub location: String, pub model: String,
+}
+impl Default for GoogleAsrConfig {
+    fn default() -> Self { Self { api_key: String::new(), service_account_json: String::new(), project_id: String::new(), location: "global".into(), model: "chirp_3".into() } }
+}
+impl AsrConfig {
+    pub fn ready(&self) -> bool {
+        match self.provider.as_str() {
+            "mimo" => !self.mimo.api_key.trim().is_empty(),
+            "cloudflare" => !self.cloudflare.api_key.trim().is_empty() && !self.cloudflare.account_id.trim().is_empty(),
+            "azure" => !self.azure.api_key.trim().is_empty() && !self.azure.region.trim().is_empty(),
+            "google" => !self.google.project_id.trim().is_empty() && (!self.google.api_key.trim().is_empty() || !self.google.service_account_json.trim().is_empty()),
+            _ => false,
+        }
+    }
+    pub fn streaming(&self) -> bool { matches!(self.provider.as_str(), "azure" | "google") }
 }

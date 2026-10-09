@@ -37,6 +37,7 @@ pub async fn transcribe(cfg: &MimoAsrConfig, wav: Vec<u8>, language: &str) -> an
     let url = format!("{}/chat/completions", trim_base(&cfg.base_url));
     let model = if cfg.model.trim().is_empty() { "mimo-v2.5-asr" } else { cfg.model.trim() };
 
+    let audio_secs = (wav.len().saturating_sub(44)) as f64 / 32000.0;
     let encoded = tokio::task::spawn_blocking(move || base64::engine::general_purpose::STANDARD.encode(&wav))
         .await
         .map_err(|e| anyhow!("编码失败: {e}"))?;
@@ -58,7 +59,7 @@ pub async fn transcribe(cfg: &MimoAsrConfig, wav: Vec<u8>, language: &str) -> an
 
     let mut attempt = 0;
     loop {
-        match send_once(&url, &cfg.api_key, &body).await {
+        match send_once(&url, &cfg.api_key, &body, model, audio_secs).await {
             Ok(text) => return Ok(clean_transcript(&text)),
             Err(f) if f.retryable && attempt == 0 => {
                 attempt += 1;
@@ -70,7 +71,7 @@ pub async fn transcribe(cfg: &MimoAsrConfig, wav: Vec<u8>, language: &str) -> an
     }
 }
 
-async fn send_once(url: &str, key: &str, body: &[u8]) -> Result<String, Failure> {
+async fn send_once(url: &str, key: &str, body: &[u8], model: &str, audio_secs: f64) -> Result<String, Failure> {
     let resp = CLIENT
         .post(url)
         .timeout(TIMEOUT)
@@ -88,6 +89,7 @@ async fn send_once(url: &str, key: &str, body: &[u8]) -> Result<String, Failure>
     }
     let v: serde_json::Value = serde_json::from_str(&text)
         .map_err(|_| Failure { message: "MiMo 返回了无法解析的响应".into(), retryable: false, status: Some(status.as_u16()) })?;
+    crate::usage::record("MiMo", model, &v, audio_secs);
     Ok(extract_content(&v))
 }
 

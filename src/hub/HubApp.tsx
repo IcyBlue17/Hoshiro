@@ -1,3 +1,4 @@
+import { StatisticsPage } from "./Statistics";
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import "./hub.css";
@@ -87,6 +88,7 @@ export default function HubApp() {
                   {page === "home" && <Home />}
                   {page === "history" && <HistoryPage />}
                   {page === "dictionary" && <DictionaryPage />}
+                  {page === "statistics" && <StatisticsPage />}
                 </motion.div>
               </AnimatePresence>
             </main>

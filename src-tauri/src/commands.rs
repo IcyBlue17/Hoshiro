@@ -394,8 +394,13 @@ pub async fn get_stats(state: State<'_, AppState>) -> CmdResult<Stats> {
 // ───────────────────────── providers ─────────────────────────
 
 #[tauri::command]
-pub async fn test_asr(config: MimoAsrConfig) -> CmdResult<TestResult> {
-    Ok(crate::providers::test_asr(&config).await)
+pub async fn test_asr(config: serde_json::Value, state: State<'_, AppState>) -> CmdResult<TestResult> {
+    // Continue accepting the original MiMo-only command payload.
+    let config: AsrConfig = if config.get("provider").is_some() { serde_json::from_value(config).map_err(|e| e.to_string())? }
+        else { AsrConfig { mimo: serde_json::from_value(config).map_err(|e| e.to_string())?, ..Default::default() } };
+    let settings = state.settings();
+    let words = state.db.words_for_prompt(100).map_err(any_err)?;
+    Ok(crate::providers::asr::test(&config, &settings.selected_languages, &words).await)
 }
 
 #[tauri::command]
@@ -551,4 +556,46 @@ mod tests {
         let long = "x".repeat(70);
         assert_eq!(parse_csv_words(&format!("{long}\nok")), vec!["ok"]);
     }
+}
+
+#[tauri::command]
+pub async fn get_profile(app: AppHandle) -> CmdResult<PersonalProfile> {
+    crate::personalize::snapshot(&app).map_err(any_err)
+}
+
+#[tauri::command]
+pub async fn run_personalization(app: AppHandle) -> CmdResult<PersonalProfile> {
+    crate::personalize::run(&app, true).await.map_err(any_err)
+}
+
+#[tauri::command]
+pub async fn update_profile(app: AppHandle, mut profile: PersonalProfile) -> CmdResult<PersonalProfile> {
+    let state = app.state::<AppState>();
+    let _gate = state.profile_gate.try_lock().map_err(|_| "请等待当前分析完成")?;
+    let old = state.db.profile().map_err(any_err)?;
+    profile.addendum_edited_by_user |= profile.prompt_addendum != old.prompt_addendum;
+    profile.updated_at = old.updated_at; profile.analyzed_sessions = old.analyzed_sessions;
+    profile.next_run_at = old.next_run_at; profile.last_error = old.last_error;
+    profile.running = false;
+    crate::personalize::sanitize(&mut profile);
+    state.db.save_profile(&profile, &[]).map_err(any_err)?;
+    let profile = crate::personalize::snapshot(&app).map_err(any_err)?;
+    let _ = app.emit(events::PROFILE_UPDATED, &profile);
+    Ok(profile)
+}
+
+#[tauri::command]
+pub async fn reset_profile(app: AppHandle) -> CmdResult<PersonalProfile> {
+    let state = app.state::<AppState>();
+    let _gate = state.profile_gate.try_lock().map_err(|_| "请等待当前分析完成")?;
+    state.db.reset_profile().map_err(any_err)?;
+    let profile = crate::personalize::snapshot(&app).map_err(any_err)?;
+    let _ = app.emit(events::PROFILE_UPDATED, &profile);
+    Ok(profile)
+}
+
+#[tauri::command]
+pub async fn get_usage(state: State<'_, AppState>, days: u32) -> CmdResult<UsageStats> {
+    let db = state.db.clone();
+    blocking(move || crate::usage::summary(&db, days)).await?.map_err(any_err)
 }

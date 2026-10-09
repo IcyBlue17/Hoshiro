@@ -47,6 +47,9 @@ struct MuteSlot {
 }
 
 struct Session {
+    stream: Arc<Mutex<Option<crate::providers::streaming::PcmSender>>>,
+    asr: crate::types::AsrConfig,
+    words: Vec<String>,
     id: String,
     mode: Mode,
     locked: bool,
@@ -112,7 +115,9 @@ struct Sink {
     session_id: String,
     tag: String,
     chunks: ChunkList,
-    asr: crate::types::MimoAsrConfig,
+    asr: crate::types::AsrConfig,
+    words: Vec<String>,
+    stream: Arc<Mutex<Option<crate::providers::streaming::PcmSender>>>,
     language: &'static str,
     epoch: Instant,
     last_level_ms: AtomicU64,
@@ -133,7 +138,12 @@ impl RecorderSink for Sink {
         let _ = self.tx.send(Cmd::RecorderError { session_id: self.session_id.clone(), message: message.to_string() });
     }
 
+    fn on_pcm(&self, samples: &[i16]) {
+        if let Some(tx) = self.stream.lock().as_ref() { let _ = tx.send(samples.to_vec()); }
+    }
+
     fn on_chunk(&self, chunk: AudioChunk) {
+        if self.asr.streaming() { return; }
         if chunk.samples.len() < MIN_CHUNK_SAMPLES {
             return;
         }
@@ -141,6 +151,7 @@ impl RecorderSink for Sink {
         let h = pipeline::spawn_asr(
             self.asr.clone(),
             self.language,
+            self.words.clone(),
             chunk.samples,
             format!("{}#{}", self.tag, chunk.index),
         );
@@ -327,10 +338,10 @@ impl Controller {
             });
             return;
         }
-        if settings.asr.mimo.api_key.trim().is_empty() {
+        if !settings.asr.ready() {
             self.refuse_start("asr_key", || {
                 alert("missing_key", "尚未配置语音识别服务", "warning")
-                    .desc("请先在设置中填写 MiMo API Key")
+                    .desc("请先在设置中配置所选语音识别服务")
                     .action("open_settings", "打开设置", "primary")
                     .duration(Some(8000))
             });
@@ -352,13 +363,22 @@ impl Controller {
         });
 
         let chunks: ChunkList = Arc::new(Mutex::new(Vec::new()));
+        let words = self.app.state::<AppState>().db.words_for_prompt(100).unwrap_or_default();
+        let stream = Arc::new(Mutex::new(None));
+        if settings.asr.streaming() {
+            let (tx, task) = crate::providers::streaming::start(settings.asr.clone(), settings.selected_languages.clone(), words.clone());
+            *stream.lock() = Some(tx);
+            chunks.lock().push((0, task));
+        }
         let sink = Arc::new(Sink {
             app: self.app.clone(),
             tx: self.tx.clone(),
             session_id: id.clone(),
             tag: tag.clone(),
             chunks: chunks.clone(),
-            asr: settings.asr.mimo.clone(),
+            asr: settings.asr.clone(),
+            words: words.clone(),
+            stream: stream.clone(),
             language: config::asr_language(&settings),
             epoch: Instant::now(),
             last_level_ms: AtomicU64::new(0),
@@ -376,6 +396,8 @@ impl Controller {
                     Err(e) => e.to_string(),
                     Ok(Ok(())) => unreachable!(),
                 };
+                stream.lock().take();
+                Self::abort_chunks(&chunks);
                 log::error!("[{tag}] recorder failed to start: {msg}");
                 self.set_phase(SessionPhase::Idle);
                 self.show_idle_bar();
@@ -421,6 +443,9 @@ impl Controller {
 
         log::info!("[{tag}] recording started mode={} locked={locked} (+{} ms)", mode.as_str(), t0.elapsed().as_millis());
         self.session = Some(Session {
+            stream,
+            asr: settings.asr.clone(),
+            words,
             id,
             mode,
             locked,
@@ -495,6 +520,7 @@ impl Controller {
 
     /// Release mute + ticker of a finished session.
     async fn release_session(&self, s: &Session) {
+        s.stream.lock().take();
         s.tick.abort();
         let guard = {
             let mut slot = s.mute.lock();
@@ -581,12 +607,13 @@ impl Controller {
         }
 
         let mut handles: Vec<_> = sess.chunks.lock().drain(..).collect();
-        if stop.tail.samples.len() >= MIN_CHUNK_SAMPLES {
+        if !sess.asr.streaming() && stop.tail.samples.len() >= MIN_CHUNK_SAMPLES {
             handles.push((
                 stop.tail.index,
                 pipeline::spawn_asr(
-                    settings.asr.mimo.clone(),
+                    sess.asr.clone(),
                     config::asr_language(&settings),
+                    sess.words.clone(),
                     stop.tail.samples.clone(),
                     format!("{tag}#{}", stop.tail.index),
                 ),

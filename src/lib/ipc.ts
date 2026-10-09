@@ -4,6 +4,7 @@
 
 import type {
   AppInfo,
+  AsrConfig,
   BarAlert,
   BarState,
   DictionaryWord,
@@ -19,6 +20,7 @@ import type {
   Permissions,
   Settings,
   Stats,
+  UsageStats,
   TestResult,
   TypelessDetection,
   TypelessImportOptions,
@@ -107,9 +109,10 @@ export const api = {
 
   // ── stats ──
   getStats: () => call<Stats>("get_stats"),
+  getUsage: (days = 30) => call<UsageStats>("get_usage", { days }),
 
   // ── providers ──
-  testAsr: (config: MimoAsrConfig) => call<TestResult>("test_asr", { config }),
+  testAsr: (config: MimoAsrConfig | AsrConfig) => call<TestResult>("test_asr", { config }),
   testLlm: (provider: LlmProvider, config: LlmEndpointConfig) => call<TestResult>("test_llm", { provider, config }),
   listModels: (provider: LlmProvider, config: LlmEndpointConfig) => call<string[]>("list_models", { provider, config }),
 

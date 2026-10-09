@@ -38,8 +38,11 @@ export interface MimoAsrConfig {
 }
 
 export interface AsrConfig {
-  provider: "mimo";
+  provider: "mimo" | "cloudflare" | "azure" | "google";
   mimo: MimoAsrConfig;
+  cloudflare: { accountId: string; apiKey: string; model: string };
+  azure: { apiKey: string; region: string };
+  google: { apiKey: string; serviceAccountJson: string; projectId: string; location: string; model: string };
 }
 
 export interface LlmEndpointConfig {
@@ -320,3 +323,25 @@ export const EVENTS = {
   permissionsChanged: "app://permissions-changed", // payload: Permissions
   profileUpdated: "app://profile-updated", // payload: PersonalProfile
 } as const;
+
+export interface UsageBucket {
+  label: string;
+  sessions: number;
+  words: number;
+  audioSecs: number;
+  inputTokens: number;
+  outputTokens: number;
+  requests: number;
+  unreportedRequests: number;
+}
+export interface UsageStats {
+  total: UsageBucket;
+  completedSessions: number;
+  errorSessions: number;
+  dictionaryWords: number;
+  autoWords: number;
+  days: UsageBucket[];
+  modes: UsageBucket[];
+  apps: UsageBucket[];
+  providers: UsageBucket[];
+}

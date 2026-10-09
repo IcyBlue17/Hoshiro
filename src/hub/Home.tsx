@@ -10,7 +10,7 @@ import { ShortcutKeys } from "./ui";
 import { useFeedback } from "./feedback";
 import { Heatmap } from "./Heatmap";
 
-function BigNumber({ parts }: { parts: { value: string | number; unit: string }[] }) {
+export function BigNumber({ parts }: { parts: { value: string | number; unit: string }[] }) {
   return (
     <div className="stat-number">
       {parts.map((p, i) => (

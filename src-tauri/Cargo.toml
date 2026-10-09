@@ -39,6 +39,11 @@ rodio = { version = "0.21", default-features = false, features = ["wav", "playba
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 base64 = "0.22"
 futures-util = "0.3"
+cloudflare = { version = "0.14", default-features = false, features = ["rustls-tls"] }
+google-cloud-speech-v2 = { version = "1.15", default-features = false }
+google-cloud-auth = { version = "1", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 
 # ── platform (owned by platform agent) ──
 [target.'cfg(target_os = "macos")'.dependencies]

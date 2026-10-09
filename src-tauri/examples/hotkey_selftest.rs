@@ -4,15 +4,24 @@
 //!
 //!   cargo run --example hotkey_selftest
 
+#[cfg(target_os = "macos")]
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType};
+#[cfg(target_os = "macos")]
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+#[cfg(target_os = "macos")]
 use hoshiro_lib::platform::hotkey::{HotkeyAction, HotkeyEngine, SessionPhase};
+#[cfg(target_os = "macos")]
 use hoshiro_lib::types::{Mode, ShortcutBindings};
+#[cfg(target_os = "macos")]
 use parking_lot::Mutex;
+#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicU8, Ordering};
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
 fn post_flags(keycode: u16, flags: CGEventFlags) {
     let src = CGEventSource::new(CGEventSourceStateID::HIDSystemState).unwrap();
     let ev = CGEvent::new_keyboard_event(src, keycode, true).unwrap();
@@ -21,16 +30,19 @@ fn post_flags(keycode: u16, flags: CGEventFlags) {
     ev.post(CGEventTapLocation::HID);
 }
 
+#[cfg(target_os = "macos")]
 fn post_key(keycode: u16, down: bool) {
     let src = CGEventSource::new(CGEventSourceStateID::HIDSystemState).unwrap();
     let ev = CGEvent::new_keyboard_event(src, keycode, down).unwrap();
     ev.post(CGEventTapLocation::HID);
 }
 
+#[cfg(target_os = "macos")]
 fn sleep(ms: u64) {
     std::thread::sleep(Duration::from_millis(ms));
 }
 
+#[cfg(target_os = "macos")]
 fn main() {
     let bindings = ShortcutBindings {
         dictation: vec!["RightOption".into(), "Help".into()],
@@ -165,4 +177,9 @@ fn main() {
 
     println!("{}", if failures == 0 { "ALL PASSED" } else { "FAILURES" });
     std::process::exit(failures);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("此诊断工具需要在 macOS 上运行。");
 }

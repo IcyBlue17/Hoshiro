@@ -46,6 +46,22 @@ fn find_sub(hay: &[char], needle: &[char], from: usize) -> Option<usize> {
     (from..=hay.len() - needle.len()).find(|&i| hay[i..i + needle.len()] == *needle)
 }
 
+/// Locate only an unambiguous anchored region; never learn surrounding field content.
+pub fn edited_region(inserted: &str, field: &str) -> Option<String> {
+    let ins: Vec<char> = inserted.trim().chars().collect();
+    let fld: Vec<char> = field.chars().collect();
+    if ins.len() < 6 { return None; }
+    let k = (ins.len() / 3).clamp(2, 8);
+    let start = find_sub(&fld, &ins[..k], 0)?;
+    if find_sub(&fld, &ins[..k], start + 1).is_some() { return None; }
+    let tail = &ins[ins.len() - k..];
+    let end = find_sub(&fld, tail, start + k)?;
+    if find_sub(&fld, tail, end + 1).is_some() { return None; }
+    let region = &fld[start..end + k];
+    if region.len() > ins.len() * 2 + 100 { return None; }
+    Some(region.iter().collect())
+}
+
 /// If `field` contains `inserted` with exactly one token replaced by a similar different token,
 /// return the new token.
 pub fn detect_correction(inserted: &str, field: &str) -> Option<String> {
@@ -121,6 +137,13 @@ pub fn detect_correction(inserted: &str, field: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anchored_edits_do_not_capture_unrelated_fields() {
+        assert_eq!(edited_region("请把今天安排的三项任务做完之后发给我", "前文。请把今天安排的两项任务做完之后发给我。后文").as_deref(), Some("请把今天安排的两项任务做完之后发给我"));
+        assert!(edited_region("please open the dashboard now", "unrelated field").is_none());
+        assert!(edited_region("please open the dashboard now", "please open the dashboard now; please open the dashboard now").is_none());
+    }
 
     #[test]
     fn single_token_fix() {

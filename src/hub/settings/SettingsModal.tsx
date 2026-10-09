@@ -26,6 +26,7 @@ import { MicPicker } from "./MicPicker";
 import { LanguageSettings } from "./Language";
 import { AsrForm, LlmForm } from "./Providers";
 import { PermissionRows } from "./permissions";
+import { Personalization } from "./Personalization";
 import { useDebouncedField } from "../ui";
 
 const CATEGORIES: { key: SettingsCategory; label: string; icon: typeof Mic }[] = [
@@ -180,6 +181,7 @@ function StyleSection() {
   );
   return (
     <>
+      <Personalization />
       <Group>
         <Row title="智能格式化" desc="将口述的列举转成列表，长篇内容自动分段，并把口述的符号、邮箱、网址写成书面形式。">
           <Switch checked={settings.style.smartFormatting} onChange={(v) => update((d) => void (d.style.smartFormatting = v))} label="智能格式化" />

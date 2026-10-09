@@ -10,6 +10,10 @@ Reference material (gitignored, read it): `design-ref/typeless-home.png`, `typel
 
 ---
 
+## Current extensions (2026-10-09)
+
+The implementation now includes a usage page, persisted adaptive personalization and four ASR providers (MiMo, Cloudflare, Azure, Google). SQLite schema v2 keeps edits, profiles, analyzed-session IDs and provider usage. The existing hotkey and floating-bar interactions remain the baseline. See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for current behavior, SDK choices, metrics and validation limits; the sections below retain the original product specification.
+
 ## 1. Architecture
 
 ```

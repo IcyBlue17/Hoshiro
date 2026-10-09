@@ -1,7 +1,7 @@
 // Browser-only mock backend so the UI can be developed with `bun run dev` (no Tauri).
 // Agents may enrich the sample data, but must keep the command names identical to ipc.ts.
 
-import type { DictionaryWord, HistoryItem, Settings, Stats } from "./types";
+import type { DictionaryWord, HistoryItem, PersonalProfile, Settings, Stats } from "./types";
 
 type Handler = (payload: any) => void;
 const listeners = new Map<string, Set<Handler>>();
@@ -35,7 +35,10 @@ export const defaultSettings: Settings = {
   historyRetention: "1m",
   appearance: "system",
   interfaceLanguage: "zh-CN",
-  asr: { provider: "mimo", mimo: { apiKey: "", baseUrl: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5-asr" } },
+  asr: { provider: "mimo",
+    cloudflare: { accountId: "", apiKey: "", model: "@cf/openai/whisper-large-v3-turbo" },
+    azure: { apiKey: "", region: "eastasia" },
+    google: { apiKey: "", serviceAccountJson: "", projectId: "", location: "global", model: "chirp_3" }, mimo: { apiKey: "", baseUrl: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5-asr" } },
   llm: {
     enabled: true,
     provider: "gemini",
@@ -134,7 +137,7 @@ function mockStats(): Stats {
 let typelessRunning = true;
 let captureCleanup: (() => void) | null = null;
 function stopCapture() { captureCleanup?.(); captureCleanup = null; }
-let profile: any = {
+let profile: PersonalProfile = {
   updatedAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
   analyzedSessions: 214,
   pendingSessions: 9,
@@ -225,6 +228,14 @@ export async function mockInvoke<T>(cmd: string, args: any = {}): Promise<T> {
     }
     case "delete_dictionary_words": dictionary = dictionary.filter((d) => !args.ids.includes(d.id)); return r(undefined);
     case "preview_dictionary_csv": return r(["Kubernetes", "Tauri", "Zustand"]);
+    case "get_usage": {
+      const bucket = { label: "", sessions: 84, words: 12600, audioSecs: 3600, inputTokens: 48200, outputTokens: 16300, requests: 92, unreportedRequests: 6 };
+      return r({ total: bucket, completedSessions: 80, errorSessions: 2, dictionaryWords: dictionary.length, autoWords: dictionary.filter((w) => w.source === "auto").length,
+        days: Array.from({ length: args.days === 7 ? 7 : 30 }, (_, i) => ({ ...bucket, label: new Date(Date.now() - i * 86400000).toISOString().slice(0, 10), words: 100 + (i * 137) % 800, sessions: i % 5 + 1 })).reverse(),
+        modes: [{ ...bucket, label: "dictation", words: 9200 }, { ...bucket, label: "translation", words: 2200 }, { ...bucket, label: "ask", words: 1200 }],
+        apps: [{ ...bucket, label: "Cursor", words: 6200 }, { ...bucket, label: "微信", words: 4300 }, { ...bucket, label: "Notes", words: 2100 }],
+        providers: [{ ...bucket, label: "Gemini · gemini-flash-latest", audioSecs: 0 }, { ...bucket, label: "MiMo · mimo-v2.5-asr", inputTokens: 0, outputTokens: 0, unreportedRequests: 6 }] });
+    }
     case "get_stats": return r(mockStats());
     case "get_profile": return r(structuredClone(profile));
     case "run_personalization": {
@@ -233,7 +244,13 @@ export async function mockInvoke<T>(cmd: string, args: any = {}): Promise<T> {
       profile = { ...profile, running: false, pendingSessions: 0, analyzedSessions: profile.analyzedSessions + profile.pendingSessions, updatedAt: new Date().toISOString() };
       mockEmit("app://profile-updated", structuredClone(profile)); return r(structuredClone(profile));
     }
-    case "update_profile": profile = structuredClone(args.profile); return r(structuredClone(profile));
+    case "update_profile": {
+      const next: PersonalProfile = structuredClone(args.profile);
+      next.addendumEditedByUser ||= next.promptAddendum !== profile.promptAddendum;
+      profile = next;
+      mockEmit("app://profile-updated", structuredClone(profile));
+      return r(structuredClone(profile));
+    }
     case "reset_profile": profile = { ...profile, verbalTics: [], corrections: [], vocabulary: [], styleNotes: [], promptAddendum: "", addendumEditedByUser: false, updatedAt: null, analyzedSessions: 0 }; return r(structuredClone(profile));
     case "test_asr":
     case "test_llm": await sleep(600); return r({ ok: true, message: "连接成功", latencyMs: 612 });

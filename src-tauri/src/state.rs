@@ -9,7 +9,7 @@ use crate::{config, tray};
 use anyhow::Context;
 use parking_lot::{Mutex, RwLock};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::UnboundedSender;
@@ -28,6 +28,8 @@ pub struct Paths {
 }
 
 pub struct AppState {
+    pub personalizing: AtomicBool,
+    pub profile_gate: tokio::sync::Mutex<()>,
     pub paths: Paths,
     pub settings: RwLock<Settings>,
     settings_write: Mutex<()>,
@@ -69,6 +71,8 @@ impl AppState {
             ..Default::default()
         };
         Self {
+            personalizing: AtomicBool::new(false),
+            profile_gate: tokio::sync::Mutex::new(()),
             paths,
             settings: RwLock::new(settings),
             settings_write: Mutex::new(()),

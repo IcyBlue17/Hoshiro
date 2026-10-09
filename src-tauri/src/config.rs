@@ -126,6 +126,16 @@ pub fn sanitize(s: &mut Settings) {
         }
     }
 
+    if !["mimo", "cloudflare", "azure", "google"].contains(&s.asr.provider.as_str()) {
+        s.asr.provider = "mimo".into();
+    }
+    for value in [&mut s.asr.cloudflare.account_id, &mut s.asr.cloudflare.api_key,
+        &mut s.asr.cloudflare.model, &mut s.asr.azure.api_key, &mut s.asr.azure.region,
+        &mut s.asr.google.api_key, &mut s.asr.google.service_account_json,
+        &mut s.asr.google.project_id, &mut s.asr.google.location, &mut s.asr.google.model] {
+        *value = value.trim().to_string();
+    }
+
     s.asr.mimo.api_key = s.asr.mimo.api_key.trim().to_string();
     s.asr.mimo.base_url = s.asr.mimo.base_url.trim().trim_end_matches('/').to_string();
     s.asr.mimo.model = s.asr.mimo.model.trim().to_string();
