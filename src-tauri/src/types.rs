@@ -142,12 +142,38 @@ pub struct StyleConfig {
     pub custom_instructions: String,
     pub smart_formatting: bool,
     pub auto_add_dictionary: bool,
+    pub ai_personalization: bool,
 }
 
 impl Default for StyleConfig {
     fn default() -> Self {
-        Self { custom_instructions: String::new(), smart_formatting: true, auto_add_dictionary: true }
+        Self { custom_instructions: String::new(), smart_formatting: true, auto_add_dictionary: true, ai_personalization: true }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileCorrection {
+    pub wrong: String,
+    pub right: String,
+}
+
+/// Result of the AI personalization job (SPEC §9). Mirror of `PersonalProfile` in types.ts.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PersonalProfile {
+    pub updated_at: Option<String>,
+    pub analyzed_sessions: u32,
+    pub pending_sessions: u32,
+    pub next_run_at: Option<String>,
+    pub verbal_tics: Vec<String>,
+    pub corrections: Vec<ProfileCorrection>,
+    pub vocabulary: Vec<String>,
+    pub style_notes: Vec<String>,
+    pub prompt_addendum: String,
+    pub addendum_edited_by_user: bool,
+    pub last_error: Option<String>,
+    pub running: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -419,4 +445,5 @@ pub mod events {
     pub const SHORTCUT_CAPTURE: &str = "app://shortcut-capture";
     pub const MIC_TEST_LEVEL: &str = "app://mic-test-level";
     pub const PERMISSIONS_CHANGED: &str = "app://permissions-changed";
+    pub const PROFILE_UPDATED: &str = "app://profile-updated";
 }

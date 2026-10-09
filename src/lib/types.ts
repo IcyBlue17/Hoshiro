@@ -67,6 +67,8 @@ export interface StyleConfig {
   smartFormatting: boolean;
   /** Learn words automatically from the user's edits after insertion. */
   autoAddDictionary: boolean;
+  /** Periodically let the rewrite model analyse history + edits and build a personal profile. */
+  aiPersonalization: boolean;
 }
 
 export interface Settings {
@@ -152,6 +154,39 @@ export interface Stats {
   longestStreak: number;
   /** Last ~ 52 weeks, oldest first */
   heatmap: HeatmapDay[];
+}
+
+export interface ProfileCorrection {
+  /** What the recognizer/rewrite tends to produce */
+  wrong: string;
+  /** What the user actually means */
+  right: string;
+}
+
+/** Result of the AI personalization job (see SPEC §9). */
+export interface PersonalProfile {
+  /** ISO time of the last successful analysis, null = never */
+  updatedAt: string | null;
+  /** Sessions included in the last analysis */
+  analyzedSessions: number;
+  /** Completed sessions recorded since the last analysis */
+  pendingSessions: number;
+  /** ISO time of the next automatic run (null when disabled / not scheduled) */
+  nextRunAt: string | null;
+  /** Verbal tics / fillers specific to this user (removed during rewrite) */
+  verbalTics: string[];
+  /** Recurring recognition errors or user fixes */
+  corrections: ProfileCorrection[];
+  /** Proper nouns / terms learned (also added to the dictionary as "auto") */
+  vocabulary: string[];
+  /** Human-readable observations about the user's style, shown in the UI */
+  styleNotes: string[];
+  /** Generated personal prompt section injected into rewrites (user-editable) */
+  promptAddendum: string;
+  /** True once the user edited promptAddendum — AI runs then stop overwriting it */
+  addendumEditedByUser: boolean;
+  lastError: string | null;
+  running: boolean;
 }
 
 export interface MicDevice {
@@ -283,4 +318,5 @@ export const EVENTS = {
   shortcutCapture: "app://shortcut-capture", // payload: ShortcutCaptureEvent
   micTestLevel: "app://mic-test-level", // payload: number 0..1
   permissionsChanged: "app://permissions-changed", // payload: Permissions
+  profileUpdated: "app://profile-updated", // payload: PersonalProfile
 } as const;

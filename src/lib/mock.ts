@@ -44,7 +44,7 @@ export const defaultSettings: Settings = {
     openai: { apiKey: "", baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
     timeoutSecs: 12,
   },
-  style: { customInstructions: "", smartFormatting: true, autoAddDictionary: true },
+  style: { customInstructions: "", smartFormatting: true, autoAddDictionary: true, aiPersonalization: true },
   onboardingCompleted: true,
 };
 
@@ -134,6 +134,25 @@ function mockStats(): Stats {
 let typelessRunning = true;
 let captureCleanup: (() => void) | null = null;
 function stopCapture() { captureCleanup?.(); captureCleanup = null; }
+let profile: any = {
+  updatedAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
+  analyzedSessions: 214,
+  pendingSessions: 9,
+  nextRunAt: new Date(Date.now() + 19 * 3600_000).toISOString(),
+  verbalTics: ["就是说", "然后的话", "对吧", "怎么说呢"],
+  corrections: [
+    { wrong: "米莫", right: "MiMo" },
+    { wrong: "type less", right: "Typeless" },
+    { wrong: "陶瑞", right: "Tauri" },
+  ],
+  vocabulary: ["Hoshiro", "Typeless", "MiMo", "Tauri", "Gemini"],
+  styleNotes: ["经常中英混说技术词，英文术语保持原样", "聊天软件里偏口语、短句，不加句号", "长段口述常用“第一、第二”列点"],
+  promptAddendum: "用户是开发者，经常在中文里夹英文技术词（API、Tauri、prompt），保持英文原样和大小写。\n在微信 / Slack 中保持口语化短句，不加结尾句号；在邮件和文档中使用完整标点和分段。",
+  addendumEditedByUser: false,
+  lastError: null,
+  running: false,
+};
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function mockInvoke<T>(cmd: string, args: any = {}): Promise<T> {
@@ -207,6 +226,15 @@ export async function mockInvoke<T>(cmd: string, args: any = {}): Promise<T> {
     case "delete_dictionary_words": dictionary = dictionary.filter((d) => !args.ids.includes(d.id)); return r(undefined);
     case "preview_dictionary_csv": return r(["Kubernetes", "Tauri", "Zustand"]);
     case "get_stats": return r(mockStats());
+    case "get_profile": return r(structuredClone(profile));
+    case "run_personalization": {
+      profile.running = true; mockEmit("app://profile-updated", structuredClone(profile));
+      await sleep(2500);
+      profile = { ...profile, running: false, pendingSessions: 0, analyzedSessions: profile.analyzedSessions + profile.pendingSessions, updatedAt: new Date().toISOString() };
+      mockEmit("app://profile-updated", structuredClone(profile)); return r(structuredClone(profile));
+    }
+    case "update_profile": profile = structuredClone(args.profile); return r(structuredClone(profile));
+    case "reset_profile": profile = { ...profile, verbalTics: [], corrections: [], vocabulary: [], styleNotes: [], promptAddendum: "", addendumEditedByUser: false, updatedAt: null, analyzedSessions: 0 }; return r(structuredClone(profile));
     case "test_asr":
     case "test_llm": await sleep(600); return r({ ok: true, message: "连接成功", latencyMs: 612 });
     case "list_models": return r(["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-pro"]);

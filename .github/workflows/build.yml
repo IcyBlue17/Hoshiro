@@ -1,9 +1,7 @@
 name: Build
 
+# Actions 额度用完 + 仓库已转私有：只保留手动触发，平时在本机构建发 release（见 docs/NEXT.md 第零节）。
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
 
 concurrency:

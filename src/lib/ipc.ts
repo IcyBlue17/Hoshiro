@@ -14,6 +14,7 @@ import type {
   LlmProvider,
   MicDevice,
   MimoAsrConfig,
+  PersonalProfile,
   PermissionKind,
   Permissions,
   Settings,
@@ -94,6 +95,15 @@ export const api = {
   deleteDictionaryWords: (ids: string[]) => call<void>("delete_dictionary_words", { ids }),
   /** Parses a one-column CSV and returns the valid words (not yet added). */
   previewDictionaryCsv: (path: string) => call<string[]>("preview_dictionary_csv", { path }),
+
+  // ── AI personalization ──
+  getProfile: () => call<PersonalProfile>("get_profile"),
+  /** Runs the analysis now (resolves when finished; progress also via EVENTS.profileUpdated with running=true). */
+  runPersonalization: () => call<PersonalProfile>("run_personalization"),
+  /** Save user edits (removed items, edited promptAddendum). Returns the saved profile. */
+  updateProfile: (profile: PersonalProfile) => call<PersonalProfile>("update_profile", { profile }),
+  /** Forget everything learned (keeps dictionary words). */
+  resetProfile: () => call<PersonalProfile>("reset_profile"),
 
   // ── stats ──
   getStats: () => call<Stats>("get_stats"),
