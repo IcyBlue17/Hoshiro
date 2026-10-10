@@ -327,6 +327,8 @@ impl Controller {
             return;
         }
         let settings = self.state().settings();
+        // Fire-and-forget: opens pooled connections to the ASR/LLM hosts while the mic starts.
+        crate::providers::warm::warm_up(&settings);
 
         let perms = tauri::async_runtime::spawn_blocking(permissions::check).await.ok();
         if perms.is_some_and(|p| p.microphone == PermissionState::Denied) {

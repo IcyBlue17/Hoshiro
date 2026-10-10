@@ -110,6 +110,28 @@ pub struct LlmConfig {
     pub anthropic: LlmEndpointConfig,
     pub openai: LlmEndpointConfig,
     pub timeout_secs: u32,
+    /// Thinking effort for interactive rewrites: "off" | "low" | "medium" | "high". "off" is fastest.
+    pub reasoning_effort: String,
+    /// Model used by the background personalization analysis.
+    pub personalization: PersonalizationLlm,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PersonalizationLlm {
+    /// Use the rewrite provider + model (credentials always come from that provider's endpoint config).
+    pub follow_rewrite: bool,
+    pub provider: LlmProvider,
+    /// Empty = that provider's configured rewrite model.
+    pub model: String,
+    /// "off" | "low" | "medium" | "high"
+    pub reasoning_effort: String,
+}
+
+impl Default for PersonalizationLlm {
+    fn default() -> Self {
+        Self { follow_rewrite: true, provider: LlmProvider::Gemini, model: String::new(), reasoning_effort: "medium".into() }
+    }
 }
 
 impl Default for LlmConfig {
@@ -125,6 +147,8 @@ impl Default for LlmConfig {
                 model: "gpt-4.1-mini".into(),
             },
             timeout_secs: 12,
+            reasoning_effort: "off".into(),
+            personalization: PersonalizationLlm::default(),
         }
     }
 }
@@ -146,11 +170,19 @@ pub struct StyleConfig {
     pub smart_formatting: bool,
     pub auto_add_dictionary: bool,
     pub ai_personalization: bool,
+    /// How long dictation is organised: "paragraphs" (conservative, default) | "list" (Typeless-like numbered lists).
+    pub long_form_style: String,
 }
 
 impl Default for StyleConfig {
     fn default() -> Self {
-        Self { custom_instructions: String::new(), smart_formatting: true, auto_add_dictionary: true, ai_personalization: true }
+        Self {
+            custom_instructions: String::new(),
+            smart_formatting: true,
+            auto_add_dictionary: true,
+            ai_personalization: true,
+            long_form_style: "paragraphs".into(),
+        }
     }
 }
 
@@ -461,7 +493,42 @@ pub struct UsageBucket {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub requests: u64,
+    /// LLM requests whose response carried no token usage (never set for speech recognition).
     pub unreported_requests: u64,
+    /// "asr" | "llm" | "" (non-provider buckets).
+    pub kind: String,
+    pub cached_tokens: u64,
+    /// Median speech-recognition / rewrite latency for this model (ms), when history has timings.
+    pub median_ms: Option<u64>,
+    pub latency_samples: u64,
+}
+
+/// Distribution summary over a set of timings (ms). `samples == 0` means no data.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LatencyStat {
+    pub samples: u64,
+    pub median_ms: u64,
+    pub p90_ms: u64,
+    pub mean_ms: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LatencyReport {
+    /// Release-to-insert time.
+    pub total: LatencyStat,
+    pub asr: LatencyStat,
+    pub llm: LatencyStat,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct OutcomeCounts {
+    pub completed: u64,
+    pub dismissed: u64,
+    pub error: u64,
+    pub empty: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -476,6 +543,22 @@ pub struct UsageStats {
     pub modes: Vec<UsageBucket>,
     pub apps: Vec<UsageBucket>,
     pub providers: Vec<UsageBucket>,
+    // ── additive (usage page v2) ──
+    /// Speech-recognition requests only (tokens, if any, are incidental).
+    pub asr_total: UsageBucket,
+    /// Rewrite-model requests only.
+    pub llm_total: UsageBucket,
+    pub asr_models: Vec<UsageBucket>,
+    pub llm_models: Vec<UsageBucket>,
+    pub outcomes: OutcomeCounts,
+    pub latency: LatencyReport,
+    /// Completed sessions per local hour of day (24 entries).
+    pub hours: Vec<u64>,
+    /// Completed sessions per weekday, Monday first (7 entries).
+    pub weekdays: Vec<u64>,
+    pub longest_session_secs: f64,
+    pub average_session_secs: f64,
+    pub average_words_per_session: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

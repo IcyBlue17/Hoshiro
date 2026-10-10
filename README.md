@@ -63,3 +63,7 @@ bun run tauri build    # 打包
 只改界面的话，`bun run dev` 然后打开 `http://localhost:1420`（悬浮条看 `?window=bar&demo=1`），浏览器里有假数据可以直接看效果。
 
 项目结构和实现细节见 [SPEC.md](SPEC.md)。
+
+## 许可证
+
+MIT。第三方组件见应用内「关于 › 第三方开源组件」。

@@ -41,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
             translation_target: None,
             custom_instructions: settings.style.custom_instructions.clone(),
             smart_formatting: settings.style.smart_formatting,
+            long_lists: false,
             duration_secs,
             profile: None,
         };

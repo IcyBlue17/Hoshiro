@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::path::{Path, PathBuf};
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -34,6 +34,14 @@ pub struct HistoryRow {
     pub audio_path: Option<String>,
     pub source: String,
     pub words: u32,
+    /// Per-session timings (ms), recorded by the pipeline for live sessions; NULL for older rows.
+    pub asr_ms: Option<u32>,
+    pub llm_ms: Option<u32>,
+    /// Release/finish to insertion.
+    pub total_ms: Option<u32>,
+    /// "Provider · model" label matching the usage table.
+    pub asr_provider: Option<String>,
+    pub llm_model: Option<String>,
 }
 
 impl HistoryRow {
@@ -54,6 +62,11 @@ impl HistoryRow {
             audio_path: None,
             source: "hoshiro".into(),
             words: 0,
+            asr_ms: None,
+            llm_ms: None,
+            total_ms: None,
+            asr_provider: None,
+            llm_model: None,
         }
     }
 }
@@ -77,7 +90,8 @@ pub fn normalize_ts(s: &str) -> Option<String> {
 }
 
 const HISTORY_COLS: &str = "id, created_at, mode, status, raw_text, refined_text, selected_text, duration_secs, \
-     app_name, bundle_id, window_title, error_message, audio_path, source, words";
+     app_name, bundle_id, window_title, error_message, audio_path, source, words, \
+     asr_ms, llm_ms, total_ms, asr_provider, llm_model";
 
 fn row_to_history(r: &Row<'_>) -> rusqlite::Result<HistoryRow> {
     Ok(HistoryRow {
@@ -96,6 +110,11 @@ fn row_to_history(r: &Row<'_>) -> rusqlite::Result<HistoryRow> {
         audio_path: r.get(12)?,
         source: r.get::<_, Option<String>>(13)?.unwrap_or_else(|| "hoshiro".into()),
         words: r.get::<_, Option<i64>>(14)?.unwrap_or(0).max(0) as u32,
+        asr_ms: r.get::<_, Option<i64>>(15)?.map(|v| v.clamp(0, u32::MAX as i64) as u32),
+        llm_ms: r.get::<_, Option<i64>>(16)?.map(|v| v.clamp(0, u32::MAX as i64) as u32),
+        total_ms: r.get::<_, Option<i64>>(17)?.map(|v| v.clamp(0, u32::MAX as i64) as u32),
+        asr_provider: r.get(18)?,
+        llm_model: r.get(19)?,
     })
 }
 
@@ -159,6 +178,21 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
             PRAGMA user_version = 2;
             COMMIT;")?;
         version = 2;
+    }
+    if version < 3 {
+        // Additive only: old rows keep NULL timings.
+        conn.execute_batch(
+            "BEGIN;
+            ALTER TABLE history ADD COLUMN asr_ms INTEGER;
+            ALTER TABLE history ADD COLUMN llm_ms INTEGER;
+            ALTER TABLE history ADD COLUMN total_ms INTEGER;
+            ALTER TABLE history ADD COLUMN asr_provider TEXT;
+            ALTER TABLE history ADD COLUMN llm_model TEXT;
+            ALTER TABLE usage ADD COLUMN cached_tokens INTEGER;
+            PRAGMA user_version = 3;
+            COMMIT;",
+        )?;
+        version = 3;
     }
     debug_assert_eq!(version, SCHEMA_VERSION);
     Ok(())
@@ -437,53 +471,106 @@ impl Db {
 
     pub fn usage_stats(&self, days: u32) -> anyhow::Result<crate::types::UsageStats> {
         use crate::types::{UsageBucket, UsageStats};
+        use crate::usage::{classify, latency, percentile, Kind};
+        use chrono::{Datelike, Timelike};
         use std::collections::BTreeMap;
         let cutoff = if days == 0 { String::new() } else {
             (chrono::Local::now().date_naive() - chrono::Duration::days(days.min(366) as i64 - 1)).to_string()
         };
         let conn = self.conn.lock();
-        let mut stats = UsageStats::default();
+        let mut stats = UsageStats { hours: vec![0; 24], weekdays: vec![0; 7], ..Default::default() };
         let (mut daily, mut modes, mut apps, mut providers) = (BTreeMap::<String, UsageBucket>::new(), BTreeMap::<String, UsageBucket>::new(), BTreeMap::<String, UsageBucket>::new(), BTreeMap::<String, UsageBucket>::new());
-        let mut stmt = conn.prepare("SELECT created_at, mode, status, duration_secs, words, COALESCE(app_name, '未知应用') FROM history")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, f64>(3)?, r.get::<_, u64>(4)?, r.get::<_, String>(5)?)))?;
+        // Latency samples, overall and per model label.
+        let (mut t_all, mut a_all, mut l_all) = (Vec::<u64>::new(), Vec::<u64>::new(), Vec::<u64>::new());
+        let (mut a_by, mut l_by) = (BTreeMap::<String, Vec<u64>>::new(), BTreeMap::<String, Vec<u64>>::new());
+        let mut session_secs_sum = 0.0;
+        let mut stmt = conn.prepare(
+            "SELECT created_at, mode, status, duration_secs, words, app_name, source, asr_ms, llm_ms, total_ms, asr_provider, llm_model FROM history")?;
+        type HRow = (String, String, String, f64, u64, Option<String>, String, Option<u64>, Option<u64>, Option<u64>, Option<String>, Option<String>);
+        let rows = stmt.query_map([], |r| Ok::<HRow, _>((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, Option<f64>>(3)?.unwrap_or(0.0), r.get::<_, Option<i64>>(4)?.unwrap_or(0).max(0) as u64,
+            r.get(5)?, r.get::<_, Option<String>>(6)?.unwrap_or_default(), r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?)))?;
         for row in rows {
-            let (ts, mode, status, audio, words, app) = row?;
-            let date = DateTime::parse_from_rfc3339(&ts)?.with_timezone(&chrono::Local).date_naive().to_string();
+            let (ts, mode, status, audio, words, app, source, asr_ms, llm_ms, total_ms, asr_provider, llm_model) = row?;
+            let local = DateTime::parse_from_rfc3339(&ts)?.with_timezone(&chrono::Local);
+            let date = local.date_naive().to_string();
             if date < cutoff { continue; }
             stats.total.sessions += 1;
+            match status.as_str() {
+                "completed" => stats.outcomes.completed += 1,
+                "dismissed" => stats.outcomes.dismissed += 1,
+                "error" => stats.outcomes.error += 1,
+                "empty" => stats.outcomes.empty += 1,
+                _ => {}
+            }
             stats.error_sessions += u64::from(status == "error");
             if status != "completed" { continue; }
             stats.completed_sessions += 1;
+            let app = match app.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+                Some(a) => a.to_string(),
+                None if source == "typeless" => "Typeless 导入".to_string(),
+                None => "未知应用".to_string(),
+            };
             for bucket in [&mut stats.total, daily.entry(date.clone()).or_default(), modes.entry(mode.clone()).or_default(), apps.entry(app.clone()).or_default()] {
                 bucket.words += words; bucket.audio_secs += audio;
             }
             daily.get_mut(&date).unwrap().sessions += 1;
             modes.get_mut(&mode).unwrap().sessions += 1;
             apps.get_mut(&app).unwrap().sessions += 1;
+            stats.hours[local.hour() as usize] += 1;
+            stats.weekdays[local.weekday().num_days_from_monday() as usize] += 1;
+            stats.longest_session_secs = stats.longest_session_secs.max(audio);
+            session_secs_sum += audio;
+            if let Some(v) = total_ms { t_all.push(v); }
+            if let Some(v) = asr_ms { a_all.push(v); if let Some(p) = asr_provider { a_by.entry(p).or_default().push(v); } }
+            if let Some(v) = llm_ms { l_all.push(v); if let Some(m) = llm_model { l_by.entry(m).or_default().push(v); } }
         }
-        let mut stmt = conn.prepare("SELECT created_at,provider,model,input_tokens,output_tokens,audio_secs FROM usage")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<u64>>(3)?, r.get::<_, Option<u64>>(4)?, r.get::<_, f64>(5)?)))?;
+        let n = stats.completed_sessions.max(1) as f64;
+        stats.average_session_secs = session_secs_sum / n;
+        stats.average_words_per_session = stats.total.words as f64 / n;
+        stats.latency = crate::types::LatencyReport { total: latency(&mut t_all), asr: latency(&mut a_all), llm: latency(&mut l_all) };
+
+        let mut stmt = conn.prepare("SELECT created_at,provider,model,input_tokens,output_tokens,audio_secs,cached_tokens FROM usage")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<u64>>(3)?, r.get::<_, Option<u64>>(4)?, r.get::<_, f64>(5)?, r.get::<_, Option<u64>>(6)?)))?;
         for row in rows {
-            let (ts, provider, model, input, output, audio) = row?;
+            let (ts, provider, model, input, output, audio, cached) = row?;
             let date = DateTime::parse_from_rfc3339(&ts)?.with_timezone(&chrono::Local).date_naive().to_string();
             if date < cutoff { continue; }
-            let provider = providers.entry(format!("{provider} · {model}")).or_default();
-            provider.audio_secs += audio;
-            for bucket in [&mut stats.total, daily.entry(date).or_default(), provider] {
+            let kind = classify(&provider);
+            // Speech services bill by audio time; missing token counts are normal, not "unreported".
+            let unreported = kind == Kind::Llm && (input.is_none() || output.is_none());
+            let kind_total = if kind == Kind::Asr { &mut stats.asr_total } else { &mut stats.llm_total };
+            kind_total.requests += 1; kind_total.audio_secs += audio;
+            kind_total.input_tokens += input.unwrap_or(0); kind_total.output_tokens += output.unwrap_or(0);
+            kind_total.cached_tokens += cached.unwrap_or(0); kind_total.unreported_requests += u64::from(unreported);
+            let label = format!("{provider} · {model}");
+            let p = providers.entry(label.clone()).or_insert_with(|| UsageBucket { kind: kind.as_str().into(), ..Default::default() });
+            p.audio_secs += audio; p.cached_tokens += cached.unwrap_or(0);
+            for bucket in [&mut stats.total, daily.entry(date).or_default(), p] {
                 bucket.requests += 1; bucket.input_tokens += input.unwrap_or(0); bucket.output_tokens += output.unwrap_or(0);
-                bucket.unreported_requests += u64::from(input.is_none() || output.is_none());
+                bucket.unreported_requests += u64::from(unreported);
             }
         }
         let buckets = |m: BTreeMap<String, UsageBucket>| m.into_iter().map(|(label, b)| UsageBucket { label, ..b }).collect::<Vec<_>>();
         stats.days = buckets(daily); stats.modes = buckets(modes); stats.apps = buckets(apps); stats.providers = buckets(providers);
-        stats.apps.sort_by(|a,b| b.words.cmp(&a.words)); stats.apps.truncate(8);
+        for p in &mut stats.providers {
+            let by = if p.kind == "asr" { &mut a_by } else { &mut l_by };
+            if let Some(v) = by.get_mut(&p.label) {
+                v.sort_unstable();
+                p.latency_samples = v.len() as u64;
+                p.median_ms = Some(percentile(v, 0.5));
+            }
+        }
+        stats.providers.sort_by(|a, b| b.requests.cmp(&a.requests).then_with(|| a.label.cmp(&b.label)));
+        stats.asr_models = stats.providers.iter().filter(|p| p.kind == "asr").cloned().collect();
+        stats.llm_models = stats.providers.iter().filter(|p| p.kind == "llm").cloned().collect();
+        stats.apps.sort_by(|a,b| b.words.cmp(&a.words).then_with(|| a.label.cmp(&b.label))); stats.apps.truncate(6);
         (stats.dictionary_words, stats.auto_words) = conn.query_row("SELECT COUNT(*), COALESCE(SUM(source='auto'),0) FROM dictionary", [], |r| Ok((r.get(0)?,r.get(1)?)))?;
         Ok(stats)
     }
 
-    pub fn record_usage(&self, provider: &str, model: &str, input: Option<u64>, output: Option<u64>, audio: f64) -> anyhow::Result<()> {
-        self.conn.lock().execute("INSERT INTO usage(created_at,provider,model,input_tokens,output_tokens,audio_secs) VALUES(?1,?2,?3,?4,?5,?6)",
-            params![now_ts(), provider, model, input.map(|v| v as i64), output.map(|v| v as i64), audio])?;
+    pub fn record_usage_cached(&self, provider: &str, model: &str, input: Option<u64>, output: Option<u64>, cached: Option<u64>, audio: f64) -> anyhow::Result<()> {
+        self.conn.lock().execute("INSERT INTO usage(created_at,provider,model,input_tokens,output_tokens,audio_secs,cached_tokens) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+            params![now_ts(), provider, model, input.map(|v| v as i64), output.map(|v| v as i64), audio, cached.map(|v| v as i64)])?;
         Ok(())
     }
 
@@ -564,10 +651,13 @@ fn collect_audio(conn: &Connection, sql: &str, p: impl rusqlite::Params) -> anyh
 fn upsert(conn: &Connection, row: &HistoryRow) -> anyhow::Result<()> {
     conn.execute(
         &format!(
-            "INSERT INTO history ({HISTORY_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15) \
+            "INSERT INTO history ({HISTORY_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20) \
              ON CONFLICT(id) DO UPDATE SET status=excluded.status, raw_text=excluded.raw_text, \
              refined_text=excluded.refined_text, error_message=excluded.error_message, \
-             audio_path=excluded.audio_path, words=excluded.words, duration_secs=excluded.duration_secs"
+             audio_path=excluded.audio_path, words=excluded.words, duration_secs=excluded.duration_secs, \
+             asr_ms=COALESCE(excluded.asr_ms, asr_ms), llm_ms=COALESCE(excluded.llm_ms, llm_ms), \
+             total_ms=COALESCE(excluded.total_ms, total_ms), asr_provider=COALESCE(excluded.asr_provider, asr_provider), \
+             llm_model=COALESCE(excluded.llm_model, llm_model)"
         ),
         params![
             row.id,
@@ -585,6 +675,11 @@ fn upsert(conn: &Connection, row: &HistoryRow) -> anyhow::Result<()> {
             row.audio_path,
             row.source,
             row.words as i64,
+            row.asr_ms.map(i64::from),
+            row.llm_ms.map(i64::from),
+            row.total_ms.map(i64::from),
+            row.asr_provider,
+            row.llm_model,
         ],
     )?;
     Ok(())
@@ -659,7 +754,25 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM history", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        assert_eq!(conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+    }
+
+    #[test]
+    fn upgrades_v2_to_v3_keeping_data() {
+        let v2 = Connection::open_in_memory().unwrap();
+        v2.execute_batch("CREATE TABLE history(id TEXT PRIMARY KEY, created_at TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL, raw_text TEXT, refined_text TEXT, selected_text TEXT, duration_secs REAL NOT NULL DEFAULT 0, app_name TEXT, bundle_id TEXT, window_title TEXT, error_message TEXT, audio_path TEXT, source TEXT NOT NULL DEFAULT 'hoshiro', words INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE edits (history_id TEXT PRIMARY KEY, inserted TEXT NOT NULL, final_text TEXT NOT NULL, app_name TEXT, created_at TEXT NOT NULL);
+            CREATE TABLE usage (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER, output_tokens INTEGER, audio_secs REAL NOT NULL DEFAULT 0);
+            INSERT INTO history(id,created_at,mode,status,words) VALUES('old','2026-01-01T00:00:00.000Z','dictation','completed',7);
+            INSERT INTO usage(created_at,provider,model,input_tokens,output_tokens) VALUES('2026-01-01T00:00:00.000Z','Gemini','m',1,2);
+            PRAGMA user_version=2;").unwrap();
+        migrate(&v2).unwrap();
+        migrate(&v2).unwrap();
+        assert_eq!(v2.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+        let (w, t, a): (i64, Option<i64>, Option<String>) = v2.query_row("SELECT words,total_ms,asr_provider FROM history WHERE id='old'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((w, t, a), (7, None, None));
+        assert_eq!(v2.query_row("SELECT input_tokens FROM usage", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        v2.execute("UPDATE usage SET cached_tokens=3", []).unwrap();
     }
 
     #[test]
@@ -669,17 +782,80 @@ mod tests {
         let mut h = row("one", Mode::Dictation, "completed", "你好世界", &now_ts());
         h.duration_secs = 12.0;
         db.upsert_history(&h).unwrap(); db.upsert_history(&h).unwrap();
-        db.record_usage("MiMo", "asr", None, None, 12.0).unwrap();
-        db.record_usage("Gemini", "flash", Some(10), Some(20), 0.0).unwrap();
-        db.record_usage("Gemini", "flash", Some(30), Some(5), 0.0).unwrap();
+        db.record_usage_cached("MiMo", "asr", None, None, None, 12.0).unwrap();
+        db.record_usage_cached("Gemini", "flash", Some(10), Some(20), None, 0.0).unwrap();
+        db.record_usage_cached("Gemini", "flash", Some(30), Some(5), None, 0.0).unwrap();
         let s = db.usage_stats(7).unwrap();
         assert_eq!(s.completed_sessions, 1);
         assert_eq!(s.total.requests, 3); assert_eq!(s.total.input_tokens, 40);
-        assert_eq!(s.total.output_tokens, 25); assert_eq!(s.total.unreported_requests, 1);
+        assert_eq!(s.total.output_tokens, 25);
+        // ASR rows are never "unreported"; only LLM calls without usage would be.
+        assert_eq!(s.total.unreported_requests, 0); assert_eq!(s.llm_total.unreported_requests, 0);
+        assert_eq!((s.asr_total.requests, s.llm_total.requests), (1, 2));
+        assert_eq!(s.asr_models.len(), 1); assert_eq!(s.llm_models.len(), 1);
+        assert_eq!(s.llm_models[0].input_tokens, 40);
         assert_eq!(s.total.audio_secs, 12.0);
         db.delete_all_history().unwrap();
         let s = db.usage_stats(0).unwrap();
         assert_eq!(s.total.sessions, 0); assert_eq!(s.total.requests, 3);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn llm_without_usage_is_unreported_and_asr_is_not() {
+        let dir = tmp_dir();
+        let db = Db::open_in_memory(dir.clone()).unwrap();
+        db.record_usage_cached("Cloudflare", "whisper", None, None, None, 5.0).unwrap();
+        db.record_usage_cached("Gemini", "flash", None, None, None, 0.0).unwrap();
+        db.record_usage_cached("Anthropic", "haiku", Some(100), Some(10), Some(80), 0.0).unwrap();
+        let s = db.usage_stats(0).unwrap();
+        assert_eq!(s.asr_total.unreported_requests, 0);
+        assert_eq!(s.llm_total.unreported_requests, 1);
+        assert_eq!(s.llm_total.cached_tokens, 80);
+        assert_eq!(s.asr_total.audio_secs, 5.0);
+        assert!(s.asr_models.iter().all(|m| m.kind == "asr" && m.unreported_requests == 0));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sessions_latency_apps_outcomes_and_period() {
+        let dir = tmp_dir();
+        let db = Db::open_in_memory(dir.clone()).unwrap();
+        let old = (Utc::now() - chrono::Duration::days(20)).to_rfc3339_opts(SecondsFormat::Millis, true);
+        let mk = |id: &str, status: &str, ts: &str, total: Option<u32>| {
+            let mut r = row(id, Mode::Dictation, status, "你好世界", ts);
+            r.duration_secs = 10.0;
+            r.total_ms = total;
+            r.asr_ms = total.map(|t| t / 2);
+            r.asr_provider = total.map(|_| "MiMo · asr".to_string());
+            r
+        };
+        for (i, t) in [1000u32, 2000, 3000, 4000, 10_000].into_iter().enumerate() {
+            db.upsert_history(&mk(&format!("c{i}"), "completed", &now_ts(), Some(t))).unwrap();
+        }
+        db.upsert_history(&mk("old", "completed", &old, Some(500))).unwrap();
+        db.upsert_history(&mk("legacy", "completed", &now_ts(), None)).unwrap();
+        db.upsert_history(&mk("x", "error", &now_ts(), None)).unwrap();
+        db.upsert_history(&mk("d", "dismissed", &now_ts(), None)).unwrap();
+        db.upsert_history(&mk("e", "empty", &now_ts(), None)).unwrap();
+        let mut t = mk("t", "completed", &now_ts(), None);
+        t.source = "typeless".into();
+        db.upsert_history(&t).unwrap();
+        let s7 = db.usage_stats(7).unwrap();
+        assert_eq!(s7.outcomes.completed, 7); assert_eq!(s7.outcomes.error, 1);
+        assert_eq!((s7.outcomes.dismissed, s7.outcomes.empty), (1, 1));
+        // only rows with timings count: 5 recent ones (the 20-day-old one is outside 7 days)
+        assert_eq!(s7.latency.total.samples, 5);
+        assert_eq!(s7.latency.total.median_ms, 3000);
+        assert_eq!(s7.latency.total.p90_ms, 7600);
+        assert_eq!(s7.latency.llm.samples, 0);
+        assert!(s7.apps.iter().any(|a| a.label == "Typeless 导入"));
+        assert!(s7.apps.iter().any(|a| a.label == "未知应用"));
+        assert_eq!(s7.hours.iter().sum::<u64>(), 7);
+        assert_eq!(s7.weekdays.iter().sum::<u64>(), 7);
+        assert_eq!(s7.longest_session_secs, 10.0);
+        let all = db.usage_stats(0).unwrap();
+        assert_eq!(all.latency.total.samples, 6);
         let _ = std::fs::remove_dir_all(dir);
     }
 

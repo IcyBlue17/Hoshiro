@@ -28,6 +28,8 @@ pub struct RewriteRequest {
     pub translation_target: Option<String>,
     pub custom_instructions: String,
     pub smart_formatting: bool,
+    /// Organise long dictation as numbered lists instead of paragraphs.
+    pub long_lists: bool,
     pub profile: Option<crate::types::PersonalProfile>,
     pub duration_secs: f64,
 }
@@ -54,6 +56,60 @@ fn provider_label(p: LlmProvider) -> &'static str {
     }
 }
 
+/// Unified reasoning effort; mapped per provider in the `*_complete` functions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Effort {
+    #[default]
+    Off,
+    Low,
+    Medium,
+    High,
+}
+
+impl Effort {
+    /// Parse the settings string; unknown values mean Off.
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_lowercase().as_str() {
+            "low" => Effort::Low,
+            "medium" => Effort::Medium,
+            "high" => Effort::High,
+            _ => Effort::Off,
+        }
+    }
+
+    fn level(self) -> &'static str {
+        match self {
+            Effort::Off | Effort::Low => "low",
+            Effort::Medium => "medium",
+            Effort::High => "high",
+        }
+    }
+
+    fn anthropic_budget(self) -> u32 {
+        match self {
+            Effort::Off | Effort::Low => 1024,
+            Effort::Medium => 4096,
+            Effort::High => 16000,
+        }
+    }
+
+    fn gemini_budget(self) -> u32 {
+        match self {
+            Effort::Off => 0,
+            Effort::Low => 1024,
+            Effort::Medium => 8192,
+            Effort::High => 24576,
+        }
+    }
+
+    fn gemini_level(self) -> &'static str {
+        match self {
+            Effort::Off => "minimal",
+            other => other.level(),
+        }
+    }
+}
+
 /// Optional request parameters the server rejected for a given provider+model; not sent again.
 static REJECTED_PARAMS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
@@ -64,7 +120,7 @@ fn param_key(p: LlmProvider, model: &str, param: &str) -> String {
 /// Run the rewrite for the active provider in `cfg` (honours cfg.timeout_secs).
 pub async fn rewrite(cfg: &LlmConfig, req: &RewriteRequest) -> anyhow::Result<RewriteOutcome> {
     let secs = cfg.timeout_secs.clamp(1, 120) as u64 + (req.duration_secs / 60.0 * 6.0).ceil() as u64;
-    match tokio::time::timeout(Duration::from_secs(secs), rewrite_with(cfg.provider, cfg.active_endpoint(), req, secs)).await {
+    match tokio::time::timeout(Duration::from_secs(secs), rewrite_with(cfg.provider, cfg.active_endpoint(), req, secs, Effort::parse(&cfg.reasoning_effort))).await {
         Ok(r) => r,
         Err(_) => Err(anyhow!("改写超时（{secs} 秒）")),
     }
@@ -75,10 +131,11 @@ async fn rewrite_with(
     ep: &LlmEndpointConfig,
     req: &RewriteRequest,
     timeout_secs: u64,
+    effort: Effort,
 ) -> anyhow::Result<RewriteOutcome> {
-    let system = prompts::system_prompt(req.mode, req.smart_formatting);
+    let system = prompts::system_prompt_for(req.mode, req.smart_formatting, req.long_lists);
     let user = prompts::build_user_message(req);
-    let raw = complete(provider, ep, &system, &user, req.mode == Mode::Ask, timeout_secs, true).await?;
+    let raw = complete(provider, ep, &system, &user, req.mode == Mode::Ask, timeout_secs, effort).await?;
     finalize(req, &raw)
 }
 
@@ -277,8 +334,7 @@ pub(crate) async fn complete(
     user: &str,
     json_mode: bool,
     timeout_secs: u64,
-    // Interactive rewrites: suppress optional model reasoning for latency. Background jobs keep defaults.
-    fast: bool,
+    effort: Effort,
 ) -> anyhow::Result<String> {
     if ep.api_key.trim().is_empty() {
         return Err(anyhow!("未配置{}的 API Key", provider_label(provider)));
@@ -288,9 +344,9 @@ pub(crate) async fn complete(
     }
     let timeout = Duration::from_secs(timeout_secs.max(1));
     let r = match provider {
-        LlmProvider::Gemini => gemini_complete(ep, system, user, json_mode, timeout).await,
-        LlmProvider::Anthropic => anthropic_complete(ep, system, user, timeout, fast).await,
-        LlmProvider::Openai => openai_complete(ep, system, user, timeout).await,
+        LlmProvider::Gemini => gemini_complete(ep, system, user, json_mode, timeout, effort).await,
+        LlmProvider::Anthropic => anthropic_complete(ep, system, user, timeout, effort).await,
+        LlmProvider::Openai => openai_complete(ep, system, user, timeout, effort).await,
     };
     r.map_err(anyhow::Error::new)
 }
@@ -334,6 +390,15 @@ fn gemini_base(ep: &LlmEndpointConfig) -> String {
     }
 }
 
+/// gemini-3 takes `thinkingLevel`; 2.5 and earlier take `thinkingBudget`.
+fn gemini_thinking(model: &str, effort: Effort) -> Value {
+    if model.to_lowercase().contains("gemini-3") {
+        json!({ "thinkingLevel": effort.gemini_level() })
+    } else {
+        json!({ "thinkingBudget": effort.gemini_budget() })
+    }
+}
+
 fn gemini_model(ep: &LlmEndpointConfig) -> String {
     ep.model.trim().trim_start_matches("models/").to_string()
 }
@@ -344,6 +409,7 @@ async fn gemini_complete(
     user: &str,
     json_mode: bool,
     timeout: Duration,
+    effort: Effort,
 ) -> Result<String, Failure> {
     let model = gemini_model(ep);
     let url = format!("{}/models/{}:generateContent", gemini_base(ep), model);
@@ -355,7 +421,7 @@ async fn gemini_complete(
     for _ in 0..3 {
         let mut gen = json!({ "temperature": 0.2 });
         if with_thinking {
-            gen["thinkingConfig"] = json!({ "thinkingBudget": 0 });
+            gen["thinkingConfig"] = gemini_thinking(&model, effort);
         }
         if with_mime {
             gen["responseMimeType"] = json!("application/json");
@@ -418,44 +484,80 @@ fn anthropic_base(ep: &LlmEndpointConfig) -> String {
     base.strip_suffix("/v1").unwrap_or(base).to_string()
 }
 
-async fn anthropic_complete(ep: &LlmEndpointConfig, system: &str, user: &str, timeout: Duration, fast: bool) -> Result<String, Failure> {
+async fn anthropic_complete(ep: &LlmEndpointConfig, system: &str, user: &str, timeout: Duration, effort: Effort) -> Result<String, Failure> {
     let model = ep.model.trim().to_string();
     let url = format!("{}/v1/messages", anthropic_base(ep));
     let headers = [("x-api-key", ep.api_key.trim().to_string()), ("anthropic-version", "2023-06-01".to_string())];
-    // Current Claude models think adaptively by default, which multiplies rewrite latency for no gain.
-    // Prefer thinking off; models that refuse that get low effort; older models get neither.
-    // Sampling params are left at defaults: current models reject non-default temperature.
-    let no_think_key = param_key(LlmProvider::Anthropic, &model, "thinking");
-    let effort_key = param_key(LlmProvider::Anthropic, &model, "effort");
-    for _ in 0..3 {
-        let (try_no_think, try_effort) = {
-            let rejected = REJECTED_PARAMS.lock();
-            let no_think = fast && !rejected.contains(&no_think_key);
-            (no_think, fast && !no_think && !rejected.contains(&effort_key))
+    // Current Claude models think adaptively by default, which multiplies rewrite latency.
+    // Off: thinking disabled -> (models that refuse it) effort low -> plain.
+    // Low/Medium/High: output_config.effort -> (older models) legacy thinking budget -> plain.
+    // Rejections are remembered per model. Sampling params are never sent: current models reject them.
+    let key = |p: &str| param_key(LlmProvider::Anthropic, &model, p);
+    for _ in 0..5 {
+        let (mode, cache) = {
+            let rej = REJECTED_PARAMS.lock();
+            let mode = if effort == Effort::Off {
+                if !rej.contains(&key("thinking")) {
+                    AnthropicMode::Disabled
+                } else if !rej.contains(&key("effort")) {
+                    AnthropicMode::Effort(Effort::Low)
+                } else {
+                    AnthropicMode::Plain
+                }
+            } else if !rej.contains(&key("effort")) {
+                AnthropicMode::Effort(effort)
+            } else if !rej.contains(&key("budget")) {
+                AnthropicMode::Budget(effort.anthropic_budget())
+            } else {
+                AnthropicMode::Plain
+            };
+            (mode, !rej.contains(&key("cache_control")))
         };
         let mut body = json!({
             "model": model,
             "max_tokens": 4096,
-            "system": system,
+            "system": if cache {
+                json!([{ "type": "text", "text": system, "cache_control": { "type": "ephemeral" } }])
+            } else {
+                json!(system)
+            },
             "messages": [{ "role": "user", "content": user }]
         });
-        if try_no_think {
-            body["thinking"] = json!({ "type": "disabled" });
-        } else if try_effort {
-            body["output_config"] = json!({ "effort": "low" });
+        match mode {
+            AnthropicMode::Disabled => body["thinking"] = json!({ "type": "disabled" }),
+            AnthropicMode::Effort(e) => body["output_config"] = json!({ "effort": e.level() }),
+            AnthropicMode::Budget(b) => {
+                body["thinking"] = json!({ "type": "enabled", "budget_tokens": b });
+                body["max_tokens"] = json!(b + 4096);
+            }
+            AnthropicMode::Plain => {}
         }
         match post_json("Anthropic", &url, &headers, &body, timeout).await {
             Ok(v) => return extract_anthropic(&v),
-            Err(f) if try_no_think && f.status == Some(400) && mentions(&f, "thinking") => {
-                REJECTED_PARAMS.lock().insert(no_think_key.clone());
+            Err(f) if cache && mentions(&f, "cache_control") => {
+                REJECTED_PARAMS.lock().insert(key("cache_control"));
             }
-            Err(f) if try_effort && f.status == Some(400) && mentions(&f, "effort") => {
-                REJECTED_PARAMS.lock().insert(effort_key.clone());
+            Err(f) if mode == AnthropicMode::Disabled && mentions(&f, "thinking") => {
+                REJECTED_PARAMS.lock().insert(key("thinking"));
+            }
+            Err(f) if matches!(mode, AnthropicMode::Effort(_)) && mentions(&f, "effort") => {
+                REJECTED_PARAMS.lock().insert(key("effort"));
+            }
+            Err(f) if matches!(mode, AnthropicMode::Budget(_)) && (mentions(&f, "thinking") || mentions(&f, "budget")) => {
+                REJECTED_PARAMS.lock().insert(key("budget"));
             }
             Err(f) => return Err(f),
         }
     }
     Err(Failure { message: "Anthropic 请求失败".into(), retryable: false, status: None })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum AnthropicMode {
+    Disabled,
+    Effort(Effort),
+    Budget(u32),
+    Plain,
 }
 
 fn extract_anthropic(v: &Value) -> Result<String, Failure> {
@@ -484,13 +586,15 @@ fn openai_base(ep: &LlmEndpointConfig) -> String {
     if base.is_empty() { OPENAI_DEFAULT_BASE.to_string() } else { base.to_string() }
 }
 
-async fn openai_complete(ep: &LlmEndpointConfig, system: &str, user: &str, timeout: Duration) -> Result<String, Failure> {
+async fn openai_complete(ep: &LlmEndpointConfig, system: &str, user: &str, timeout: Duration, effort: Effort) -> Result<String, Failure> {
     let model = ep.model.trim().to_string();
     let url = format!("{}/chat/completions", openai_base(ep));
     let headers = [("Authorization", format!("Bearer {}", ep.api_key.trim()))];
     let temp_key = param_key(LlmProvider::Openai, &model, "temperature");
+    let reasoning_key = param_key(LlmProvider::Openai, &model, "reasoning_effort");
     let mut with_temp = !REJECTED_PARAMS.lock().contains(&temp_key);
-    for _ in 0..2 {
+    let mut with_reasoning = effort != Effort::Off && !REJECTED_PARAMS.lock().contains(&reasoning_key);
+    for _ in 0..3 {
         let mut body = json!({
             "model": model,
             "messages": [
@@ -501,11 +605,18 @@ async fn openai_complete(ep: &LlmEndpointConfig, system: &str, user: &str, timeo
         if with_temp {
             body["temperature"] = json!(0.2);
         }
+        if with_reasoning {
+            body["reasoning_effort"] = json!(effort.level());
+        }
         match post_json("OpenAI 兼容服务", &url, &headers, &body, timeout).await {
             Ok(v) => return extract_openai(&v),
             Err(f) if with_temp && mentions(&f, "temperature") => {
                 REJECTED_PARAMS.lock().insert(temp_key.clone());
                 with_temp = false;
+            }
+            Err(f) if with_reasoning && (mentions(&f, "reasoning") || mentions(&f, "effort")) => {
+                REJECTED_PARAMS.lock().insert(reasoning_key.clone());
+                with_reasoning = false;
             }
             Err(f) => return Err(f),
         }
@@ -600,6 +711,11 @@ fn collect_ids(v: &Value, out: &mut Vec<String>) {
 }
 
 pub async fn test_llm(provider: LlmProvider, cfg: &LlmEndpointConfig) -> TestResult {
+    test_llm_with(provider, cfg, Effort::Off).await
+}
+
+/// Like `test_llm`, using the interactive reasoning effort (`LlmConfig.reasoning_effort`).
+pub async fn test_llm_with(provider: LlmProvider, cfg: &LlmEndpointConfig, effort: Effort) -> TestResult {
     let req = RewriteRequest {
         mode: Mode::Dictation,
         transcript: "嗯 你好 世界".into(),
@@ -610,11 +726,12 @@ pub async fn test_llm(provider: LlmProvider, cfg: &LlmEndpointConfig) -> TestRes
         translation_target: None,
         custom_instructions: String::new(),
         smart_formatting: true,
+        long_lists: false,
         profile: None,
         duration_secs: 0.0,
     };
     let start = Instant::now();
-    let r = tokio::time::timeout(Duration::from_secs(20), rewrite_with(provider, cfg, &req, 20)).await;
+    let r = tokio::time::timeout(Duration::from_secs(20), rewrite_with(provider, cfg, &req, 20, effort)).await;
     let latency_ms = start.elapsed().as_millis() as u64;
     match r {
         Ok(Ok(RewriteOutcome::Insert(t))) | Ok(Ok(RewriteOutcome::Replace(t))) | Ok(Ok(RewriteOutcome::Answer(t))) => {
@@ -646,6 +763,7 @@ mod tests {
             translation_target: None,
             custom_instructions: String::new(),
             smart_formatting: true,
+            long_lists: false,
             profile: None,
             duration_secs: 0.0,
         }
@@ -767,9 +885,9 @@ mod tests {
         .await;
         let ep = LlmEndpointConfig { api_key: "gk".into(), base_url: base, model: "gemini-test-thinking-only".into() };
         let r = req(Mode::Dictation, "嗯 你好 世界");
-        let out = rewrite_with(LlmProvider::Gemini, &ep, &r, 10).await.unwrap();
+        let out = rewrite_with(LlmProvider::Gemini, &ep, &r, 10, Effort::Off).await.unwrap();
         assert_eq!(out, RewriteOutcome::Insert("你好世界".into()));
-        let out = rewrite_with(LlmProvider::Gemini, &ep, &r, 10).await.unwrap();
+        let out = rewrite_with(LlmProvider::Gemini, &ep, &r, 10, Effort::Off).await.unwrap();
         assert_eq!(out, RewriteOutcome::Insert("再见".into()));
         let reqs = seen.lock().unwrap();
         assert_eq!(reqs.len(), 3);
@@ -785,7 +903,7 @@ mod tests {
         use crate::providers::http::testserver::serve;
         let (base, seen) = serve(vec![(200, r#"{"choices":[{"message":{"content":"Hello"}}]}"#)]).await;
         let ep = LlmEndpointConfig { api_key: "ok".into(), base_url: format!("{base}/v1"), model: "m".into() };
-        let out = rewrite_with(LlmProvider::Openai, &ep, &req(Mode::Translation, "你好"), 10).await.unwrap();
+        let out = rewrite_with(LlmProvider::Openai, &ep, &req(Mode::Translation, "你好"), 10, Effort::Off).await.unwrap();
         assert_eq!(out, RewriteOutcome::Insert("Hello".into()));
         {
             let reqs = seen.lock().unwrap();
@@ -795,7 +913,7 @@ mod tests {
 
         let (base, seen) = serve(vec![(200, r#"{"content":[{"type":"text","text":"{\"action\":\"answer\",\"text\":\"42\"}"}]}"#)]).await;
         let ep = LlmEndpointConfig { api_key: "ak".into(), base_url: base, model: "claude-x".into() };
-        let out = rewrite_with(LlmProvider::Anthropic, &ep, &req(Mode::Ask, "六乘七"), 10).await.unwrap();
+        let out = rewrite_with(LlmProvider::Anthropic, &ep, &req(Mode::Ask, "六乘七"), 10, Effort::Off).await.unwrap();
         assert_eq!(out, RewriteOutcome::Answer("42".into()));
         let reqs = seen.lock().unwrap();
         assert!(reqs[0].starts_with("POST /v1/messages"));
@@ -817,14 +935,163 @@ mod tests {
         .await;
         let ep = LlmEndpointConfig { api_key: "ak".into(), base_url: base, model: "claude-test-fallback".into() };
         let r = req(Mode::Dictation, "嗯 你好 世界");
-        assert_eq!(rewrite_with(LlmProvider::Anthropic, &ep, &r, 10).await.unwrap(), RewriteOutcome::Insert("你好世界".into()));
-        assert_eq!(rewrite_with(LlmProvider::Anthropic, &ep, &r, 10).await.unwrap(), RewriteOutcome::Insert("你好世界".into()));
+        assert_eq!(rewrite_with(LlmProvider::Anthropic, &ep, &r, 10, Effort::Off).await.unwrap(), RewriteOutcome::Insert("你好世界".into()));
+        assert_eq!(rewrite_with(LlmProvider::Anthropic, &ep, &r, 10, Effort::Off).await.unwrap(), RewriteOutcome::Insert("你好世界".into()));
         let reqs = seen.lock().unwrap();
         assert_eq!(reqs.len(), 4);
         assert!(reqs[0].contains(r#""thinking":{"type":"disabled"}"#) && !reqs[0].contains("temperature"));
         assert!(reqs[1].contains(r#""effort":"low""#) && !reqs[1].contains("thinking"));
         assert!(!reqs[2].contains("effort") && !reqs[2].contains("thinking"));
         assert!(!reqs[3].contains("effort") && !reqs[3].contains("thinking"));
+    }
+
+    fn body_of(req: &str) -> Value {
+        serde_json::from_str(&req[req.find("\r\n\r\n").unwrap() + 4..]).unwrap()
+    }
+
+    #[test]
+    fn effort_parsing_and_gemini_mapping() {
+        assert_eq!(Effort::parse("High"), Effort::High);
+        assert_eq!(Effort::parse("bogus"), Effort::Off);
+        assert_eq!(gemini_thinking("gemini-2.5-flash", Effort::Off), json!({"thinkingBudget": 0}));
+        assert_eq!(gemini_thinking("gemini-2.5-flash", Effort::Medium), json!({"thinkingBudget": 8192}));
+        assert_eq!(gemini_thinking("gemini-2.5-flash", Effort::High), json!({"thinkingBudget": 24576}));
+        assert_eq!(gemini_thinking("gemini-3-flash-preview", Effort::Off), json!({"thinkingLevel": "minimal"}));
+        assert_eq!(gemini_thinking("gemini-3-pro", Effort::Low), json!({"thinkingLevel": "low"}));
+        assert_eq!(gemini_thinking("gemini-3-pro", Effort::High), json!({"thinkingLevel": "high"}));
+    }
+
+    #[tokio::test]
+    async fn gemini_effort_request_shapes_and_fallback() {
+        use crate::providers::http::testserver::serve;
+        let ok = r#"{"candidates":[{"content":{"parts":[{"text":"好"}]}}]}"#;
+        let (base, seen) = serve(vec![(200, ok), (200, ok)]).await;
+        let r = req(Mode::Dictation, "好");
+        let ep = LlmEndpointConfig { api_key: "k".into(), base_url: base.clone(), model: "gemini-2.5-test-a".into() };
+        rewrite_with(LlmProvider::Gemini, &ep, &r, 10, Effort::Medium).await.unwrap();
+        let ep3 = LlmEndpointConfig { model: "gemini-3-test-a".into(), ..ep };
+        rewrite_with(LlmProvider::Gemini, &ep3, &r, 10, Effort::Off).await.unwrap();
+        let reqs = seen.lock().unwrap();
+        assert_eq!(body_of(&reqs[0])["generationConfig"]["thinkingConfig"], json!({"thinkingBudget": 8192}));
+        assert_eq!(body_of(&reqs[1])["generationConfig"]["thinkingConfig"], json!({"thinkingLevel": "minimal"}));
+        drop(reqs);
+
+        let (base, seen) = serve(vec![
+            (400, r#"{"error":{"message":"Thinking level minimal is not supported"}}"#),
+            (200, ok),
+            (200, ok),
+        ])
+        .await;
+        let ep = LlmEndpointConfig { api_key: "k".into(), base_url: base, model: "gemini-3-test-b".into() };
+        rewrite_with(LlmProvider::Gemini, &ep, &r, 10, Effort::Off).await.unwrap();
+        rewrite_with(LlmProvider::Gemini, &ep, &r, 10, Effort::Off).await.unwrap();
+        let reqs = seen.lock().unwrap();
+        assert!(reqs[0].contains("thinkingLevel"));
+        assert!(!reqs[1].contains("thinkingConfig") && !reqs[2].contains("thinkingConfig"));
+    }
+
+    #[tokio::test]
+    async fn openai_reasoning_effort_and_fallback() {
+        use crate::providers::http::testserver::serve;
+        let ok = r#"{"choices":[{"message":{"content":"Hi"}}]}"#;
+        let (base, seen) = serve(vec![(200, ok), (200, ok)]).await;
+        let r = req(Mode::Translation, "你好");
+        let ep = LlmEndpointConfig { api_key: "k".into(), base_url: base, model: "o-test-a".into() };
+        rewrite_with(LlmProvider::Openai, &ep, &r, 10, Effort::Off).await.unwrap();
+        rewrite_with(LlmProvider::Openai, &ep, &r, 10, Effort::High).await.unwrap();
+        {
+            let reqs = seen.lock().unwrap();
+            assert!(!reqs[0].contains("reasoning_effort"));
+            assert_eq!(body_of(&reqs[1])["reasoning_effort"], "high");
+        }
+        let (base, seen) = serve(vec![
+            (400, r#"{"error":{"message":"Unrecognized request argument: reasoning_effort"}}"#),
+            (200, ok),
+            (200, ok),
+        ])
+        .await;
+        let ep = LlmEndpointConfig { api_key: "k".into(), base_url: base, model: "o-test-b".into() };
+        rewrite_with(LlmProvider::Openai, &ep, &r, 10, Effort::Low).await.unwrap();
+        rewrite_with(LlmProvider::Openai, &ep, &r, 10, Effort::Low).await.unwrap();
+        let reqs = seen.lock().unwrap();
+        assert!(reqs[0].contains("reasoning_effort") && !reqs[1].contains("reasoning_effort") && !reqs[2].contains("reasoning_effort"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_effort_shapes_and_budget_fallback() {
+        use crate::providers::http::testserver::serve;
+        let ok = r#"{"content":[{"type":"text","text":"好"}]}"#;
+        let r = req(Mode::Dictation, "好");
+        let (base, seen) = serve(vec![(200, ok), (200, ok)]).await;
+        let ep = LlmEndpointConfig { api_key: "k".into(), base_url: base, model: "claude-test-shape".into() };
+        rewrite_with(LlmProvider::Anthropic, &ep, &r, 10, Effort::Off).await.unwrap();
+        rewrite_with(LlmProvider::Anthropic, &ep, &r, 10, Effort::High).await.unwrap();
+        {
+            let reqs = seen.lock().unwrap();
+            let (off, high) = (body_of(&reqs[0]), body_of(&reqs[1]));
+            assert_eq!(off["thinking"], json!({"type": "disabled"}));
+            assert!(off.get("output_config").is_none() && off.get("temperature").is_none());
+            assert_eq!(high["output_config"], json!({"effort": "high"}));
+            assert!(high.get("thinking").is_none() && high.get("temperature").is_none());
+            // Prompt caching on the static system prompt.
+            assert_eq!(off["system"][0]["cache_control"], json!({"type": "ephemeral"}));
+        }
+        let (base, seen) = serve(vec![
+            (400, r#"{"error":{"message":"effort is not supported for this model"}}"#),
+            (200, ok),
+            (200, ok),
+        ])
+        .await;
+        let ep = LlmEndpointConfig { api_key: "k".into(), base_url: base, model: "claude-test-budget".into() };
+        rewrite_with(LlmProvider::Anthropic, &ep, &r, 10, Effort::Medium).await.unwrap();
+        rewrite_with(LlmProvider::Anthropic, &ep, &r, 10, Effort::High).await.unwrap();
+        let reqs = seen.lock().unwrap();
+        let (b1, b2) = (body_of(&reqs[1]), body_of(&reqs[2]));
+        assert_eq!(b1["thinking"], json!({"type": "enabled", "budget_tokens": 4096}));
+        assert_eq!(b1["max_tokens"], 8192);
+        assert!(b1.get("output_config").is_none());
+        assert_eq!(b2["thinking"]["budget_tokens"], 16000);
+        assert_eq!(b2["max_tokens"], 20096);
+    }
+
+    #[tokio::test]
+    async fn anthropic_budget_rejection_falls_back_to_plain() {
+        use crate::providers::http::testserver::serve;
+        let ok = r#"{"content":[{"type":"text","text":"好"}]}"#;
+        let (base, seen) = serve(vec![
+            (400, r#"{"error":{"message":"output_config.effort: extra inputs are not permitted"}}"#),
+            (400, r#"{"error":{"message":"thinking is not supported"}}"#),
+            (200, ok),
+        ])
+        .await;
+        let ep = LlmEndpointConfig { api_key: "k".into(), base_url: base, model: "claude-test-plain".into() };
+        rewrite_with(LlmProvider::Anthropic, &ep, &req(Mode::Dictation, "好"), 10, Effort::Low).await.unwrap();
+        let reqs = seen.lock().unwrap();
+        let last = body_of(&reqs[2]);
+        assert!(last.get("thinking").is_none() && last.get("output_config").is_none());
+    }
+
+    #[tokio::test]
+    async fn anthropic_cache_control_fallback_is_remembered() {
+        use crate::providers::http::testserver::serve;
+        let ok = r#"{"content":[{"type":"text","text":"好"}]}"#;
+        let (base, seen) = serve(vec![
+            (400, r#"{"error":{"message":"system.0.cache_control: Extra inputs are not permitted"}}"#),
+            (200, ok),
+            (200, ok),
+        ])
+        .await;
+        let ep = LlmEndpointConfig { api_key: "k".into(), base_url: base, model: "claude-test-cache".into() };
+        let r = req(Mode::Dictation, "好");
+        rewrite_with(LlmProvider::Anthropic, &ep, &r, 10, Effort::Off).await.unwrap();
+        rewrite_with(LlmProvider::Anthropic, &ep, &r, 10, Effort::Off).await.unwrap();
+        let reqs = seen.lock().unwrap();
+        assert!(reqs[0].contains("cache_control"));
+        for q in &reqs[1..] {
+            let b = body_of(q);
+            assert!(b["system"].is_string(), "{b}");
+            assert_eq!(b["thinking"], json!({"type": "disabled"}));
+        }
     }
 
     #[tokio::test]

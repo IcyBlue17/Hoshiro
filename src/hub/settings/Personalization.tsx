@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, X } from "lucide-react";
+import { AlertTriangle, Sparkles, X } from "lucide-react";
 import { api } from "../../lib/ipc";
 import { EVENTS, type PersonalProfile } from "../../lib/types";
 import { useApp } from "../store";
 import { useBackendEvent } from "../hooks";
 import { useFeedback } from "../feedback";
-import { Spinner, Switch } from "../ui";
+import { Segmented, Spinner, Switch } from "../ui";
 import { Group, Row } from "./shared";
+import { EFFORT_OPTIONS, ModelInput, PROVIDERS } from "./Providers";
 
 const date = (value: string | null) =>
   value ? new Date(value).toLocaleString("zh-CN") : "尚未分析";
@@ -71,7 +72,7 @@ export function Personalization() {
       <Group>
         <Row
           title="AI 个性化学习"
-          desc="将近期口述、翻译历史和您对输入文字的修改发送给已配置的改写模型，学习常用词与表达习惯。关闭后停止学习和应用个人偏好。"
+          desc="定期用历史记录学习你的常用词和表达习惯。"
         >
           <Switch
             checked={settings.style.aiPersonalization}
@@ -109,7 +110,7 @@ export function Personalization() {
                     : "已关闭自动分析"}
               </span>
               <span>
-                首次自动分析需 10 条，之后每批 15 条；手动分析需 3 条新记录。
+                满 15 条新记录自动分析一次。
               </span>
             </div>
             {profile.lastError && (
@@ -133,6 +134,7 @@ export function Personalization() {
           </Row>
         )}
       </Group>
+      <AnalysisModel />
       {profile && (
         <>
           <Group title="已学习的习惯">
@@ -194,7 +196,7 @@ export function Personalization() {
               title={
                 profile.addendumEditedByUser ? "由您维护" : "由 AI 自动更新"
               }
-              desc="仅影响用词、语气和格式。编辑并保存后，AI 不会覆盖您的内容。"
+              desc="编辑后 AI 不再覆盖。"
               stacked
             >
               <textarea
@@ -252,5 +254,62 @@ export function Personalization() {
         </>
       )}
     </>
+  );
+}
+
+function AnalysisModel() {
+  const { settings, update } = useApp();
+  const { llm } = settings;
+  const p = llm.personalization;
+  const follow = p.followRewrite;
+  const provider = follow ? llm.provider : p.provider;
+  const cfg = llm[provider];
+  const name = PROVIDERS.find((x) => x.value === provider)!.label;
+  return (
+    <Group title="分析模型">
+      <Row title="跟随改写模型" desc={`使用「模型服务 › 改写」中的服务商和模型（当前：${name}）。`}>
+        <Switch checked={follow} onChange={(v) => update((d) => void (d.llm.personalization.followRewrite = v))} label="跟随改写模型" />
+      </Row>
+      {!follow && (
+        <>
+          <Row title="服务商" desc="API Key 与接口地址取自「模型服务」中该服务商的配置。">
+            <Segmented
+              id="pz-provider"
+              size="sm"
+              value={p.provider}
+              onChange={(v) => update((d) => void (d.llm.personalization.provider = v))}
+              options={PROVIDERS.map((x) => ({ value: x.value, label: x.label }))}
+            />
+          </Row>
+          <Row title="模型" desc="留空则使用该服务商的改写模型。">
+            <ModelInput
+              key={provider}
+              provider={provider}
+              cfg={cfg}
+              value={p.model}
+              placeholder={cfg.model || "默认"}
+              onPick={(m) => update((d) => void (d.llm.personalization.model = m.trim()))}
+            />
+          </Row>
+          {!cfg.apiKey.trim() && (
+            <div className="srow">
+              <div className="banner warn inline" style={{ margin: 0 }}>
+                <AlertTriangle size={16} />
+                <span className="banner-text">{name} 该服务商还没有 API Key，请先在「模型服务」填写。</span>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      <Row title="思考强度" desc="后台运行，不影响打字速度，推荐「中」。">
+        <Segmented
+          id="pz-effort"
+          size="sm"
+          value={p.reasoningEffort}
+          onChange={(v) => update((d) => void (d.llm.personalization.reasoningEffort = v))}
+          options={EFFORT_OPTIONS}
+        />
+      </Row>
+    </Group>
   );
 }

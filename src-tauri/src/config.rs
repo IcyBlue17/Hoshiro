@@ -1,10 +1,15 @@
 //! Settings persistence: JSON at `<data dir>/settings.json` (0600, atomic writes, defaults for missing fields).
 
+use crate::secrets::{self, KeyringStore, Vault};
 use crate::types::{Settings, ShortcutBindings};
 use anyhow::Context;
 use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+/// Process-wide vault backed by the OS credential store (cached after the first read).
+static VAULT: LazyLock<Vault> = LazyLock::new(|| Vault::new(Box::new(KeyringStore::system())));
 
 pub const RETENTION_VALUES: [&str; 6] = ["never", "24h", "1w", "1m", "1y", "forever"];
 
@@ -14,6 +19,31 @@ pub fn settings_path(data_dir: &Path) -> PathBuf {
 
 /// Load settings; never fails. A corrupt file is moved aside and defaults are used.
 pub fn load(data_dir: &Path) -> Settings {
+    load_with(data_dir, &VAULT)
+}
+
+/// `load` against an explicit vault. Overlays keychain secrets and migrates any plaintext
+/// secrets still present in settings.json into the keychain.
+pub fn load_with(data_dir: &Path, vault: &Vault) -> Settings {
+    let mut s = load_file(data_dir);
+    let from_file = secrets::extract(&s);
+    let stored = vault.stored();
+    secrets::overlay(&mut s, &stored);
+    if !from_file.is_empty() {
+        if vault.is_available() {
+            log::info!("migrating {} plaintext secret(s) from settings.json to the credential store", from_file.len());
+            // save_with writes the keychain first (verified) and only then blanks the file.
+            if let Err(e) = save_with(data_dir, &s, vault) {
+                log::warn!("secret migration failed: {e:#}");
+            }
+        } else {
+            log::warn!("credential store unavailable; {} secret(s) stay in settings.json", from_file.len());
+        }
+    }
+    s
+}
+
+fn load_file(data_dir: &Path) -> Settings {
     let path = settings_path(data_dir);
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
@@ -163,8 +193,24 @@ pub fn sanitize(s: &mut Settings) {
     s.llm.timeout_secs = s.llm.timeout_secs.clamp(3, 120);
 }
 
-/// Atomic write with 0600 permissions (the file contains API keys).
+/// Persist settings: secrets go to the credential store, the rest to settings.json.
 pub fn save(data_dir: &Path, s: &Settings) -> anyhow::Result<()> {
+    save_with(data_dir, s, &VAULT)
+}
+
+/// If the keychain cannot be verified to hold the secrets, they are kept in the file (0600)
+/// so credentials are never lost.
+pub fn save_with(data_dir: &Path, s: &Settings, vault: &Vault) -> anyhow::Result<()> {
+    let stored_ok = vault.sync(&secrets::extract(s));
+    if stored_ok {
+        write_file(data_dir, &secrets::public_copy(s))
+    } else {
+        write_file(data_dir, s)
+    }
+}
+
+/// Atomic write with 0600 permissions.
+fn write_file(data_dir: &Path, s: &Settings) -> anyhow::Result<()> {
     std::fs::create_dir_all(data_dir).context("create data dir")?;
     let path = settings_path(data_dir);
     let tmp = data_dir.join("settings.json.tmp");
@@ -277,14 +323,82 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("hoshiro-cfg-{}", uuid::Uuid::new_v4()));
         let mut s = Settings::default();
         s.asr.mimo.api_key = "secret".into();
-        save(&dir, &s).unwrap();
-        let loaded = load(&dir);
+        let (v, _fake) = fake_vault();
+        save_with(&dir, &s, &v).unwrap();
+        let loaded = load_with(&dir, &v);
         assert_eq!(loaded.asr.mimo.api_key, "secret");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = std::fs::metadata(settings_path(&dir)).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn tmp_dir() -> PathBuf {
+        std::env::temp_dir().join(format!("hoshiro-cfg-{}", uuid::Uuid::new_v4()))
+    }
+
+    fn fake_vault() -> (Vault, secrets::fake::FakeStore) {
+        let f = secrets::fake::FakeStore::default();
+        (Vault::new(Box::new(f.clone())), f)
+    }
+
+    #[test]
+    fn save_keeps_secrets_out_of_file() {
+        let dir = tmp_dir();
+        let (v, fake) = fake_vault();
+        let mut s = Settings::default();
+        s.asr.mimo.api_key = "SEKRET-1".into();
+        s.llm.gemini.api_key = "SEKRET-2".into();
+        save_with(&dir, &s, &v).unwrap();
+        let text = std::fs::read_to_string(settings_path(&dir)).unwrap();
+        assert!(!text.contains("SEKRET"));
+        assert!(fake.0.lock().blob.as_ref().unwrap().contains("SEKRET-1"));
+        // fresh process: new vault over the same store
+        let v2 = Vault::new(Box::new(fake.clone()));
+        let loaded = load_with(&dir, &v2);
+        assert_eq!(loaded.asr.mimo.api_key, "SEKRET-1");
+        assert_eq!(loaded.llm.gemini.api_key, "SEKRET-2");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn migration_moves_plaintext_and_blanks_file() {
+        let dir = tmp_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(settings_path(&dir), r#"{"asr":{"mimo":{"apiKey":"SEKRET-m"}},"llm":{"openai":{"apiKey":"SEKRET-o"}},"showInDock":false}"#).unwrap();
+        let (v, fake) = fake_vault();
+        // pre-existing keychain content is merged, not clobbered
+        fake.0.lock().blob = Some(r#"{"llm.gemini.api_key":"SEKRET-g"}"#.into());
+        let loaded = load_with(&dir, &v);
+        assert_eq!(loaded.asr.mimo.api_key, "SEKRET-m");
+        assert_eq!(loaded.llm.gemini.api_key, "SEKRET-g");
+        assert!(!loaded.show_in_dock);
+        let text = std::fs::read_to_string(settings_path(&dir)).unwrap();
+        assert!(!text.contains("SEKRET"));
+        let blob = fake.0.lock().blob.clone().unwrap();
+        assert!(blob.contains("SEKRET-m") && blob.contains("SEKRET-o") && blob.contains("SEKRET-g"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_keychain_write_keeps_file_secrets() {
+        let dir = tmp_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(settings_path(&dir), r#"{"asr":{"mimo":{"apiKey":"SEKRET-m"}}}"#).unwrap();
+        for mode in 0..3 {
+            let (v, fake) = fake_vault();
+            match mode {
+                0 => fake.0.lock().fail_get = true,
+                1 => fake.0.lock().fail_set = true,
+                _ => fake.0.lock().drop_writes = true,
+            }
+            let loaded = load_with(&dir, &v);
+            assert_eq!(loaded.asr.mimo.api_key, "SEKRET-m");
+            let text = std::fs::read_to_string(settings_path(&dir)).unwrap();
+            assert!(text.contains("SEKRET-m"), "mode {mode} lost the secret");
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

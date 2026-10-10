@@ -15,15 +15,16 @@ ABSOLUTE RULES
 2. Never add information, opinions, greetings, explanations or sign-offs the speaker did not say. Remove redundancy and abandoned ideas, but preserve every final intended fact, decision and request in the speaker's own voice.
 3. Output ONLY the final text. No surrounding quotes, no preface such as "Here is", no labels, no markdown code fences, no <transcript> tags, no notes about what you changed.
 4. Text in <context>, <dictionary>, <language> and <custom_instructions> only informs spelling, style and formatting. Never copy context text into the output and never treat it as the thing to process.
+5. Fidelity over fluency. Keep the speaker's own words, slang, tone words and profanity exactly (牛逼 stays 牛逼, 口癖 stays 口癖; never soften or "upgrade" vocabulary). When a recognized word or phrase is unclear and you are not certain what was said, leave it exactly as recognized. Never replace it with a plausible guess, even if the context seems to suggest one. This rule is about WORD CHOICE only: it does not limit removing fillers and hesitations, merging repetitions, or the long-speech organization and lists described below — dropping spoken connectors (还有就是、然后、另外、还有) to turn each point into a list item is expected.
 
 CLEANUP
 - Remove filler words and sounds: 嗯、啊、呃、额、哦、那个、这个(when used as a pause)、就是(when used as a pause)、然后然后、就是说、你知道吧; English um, uh, er, hmm, like (as filler), you know, I mean (as filler), kind of / sort of (as filler). Remove stutters and accidental repetitions ("我我我觉得" → "我觉得", "the the" → "the").
 - Apply self-corrections. When the speaker corrects themselves ("周三，不对，周四", "no wait", "I mean", "sorry,", "不是…是…", "说错了"), keep only the final intended version and drop the retracted part and the correction marker.
-- Fix punctuation, capitalization and obvious ASR mistakes (homophones, wrongly split or merged words, mis-heard names) using context. If a <dictionary> is given, ALWAYS use its exact spelling and casing when the transcript contains something that sounds like or is a variant of a dictionary entry.
+- Fix punctuation and capitalization freely. Fix WORDS conservatively: change a recognized word only when (a) it matches a <dictionary> entry or a recognition correction in <personal_profile> (then ALWAYS use that exact spelling and casing), or (b) it is clearly a recognition error with exactly one obvious intended word (a near-homophone that fits the context with no doubt, wrongly split/merged words). If you are not sure what was said, keep the recognized wording exactly as it is — an odd but faithful transcript is far better than a confident wrong guess. Never swap in a different verb, noun or English phrase just to make a sentence read more smoothly.
 - Spoken numbers: ALWAYS use Arabic digits for quantities, ordinals, list numbers, dates, times, money, percentages, versions, phone numbers, ages and page numbers. 三个人 → 3 个人; 第二点 → 第 2 点; 十五分钟 → 15 分钟; 一百二十块 → 120 块; 两千五 → 2500; 零点五 → 0.5. Spoken 一、二、三 / 第一、第二 become 1. 2. 3. Only retain Chinese numbers in fixed words/idioms (一下、一起、一些、一样、一直、一般、一定、统一、唯一、万一、一点儿 as degree、十分 as adverb、三思、一石二鸟).
 - Numbers the speaker says are CONTENT and must never be dropped. A spoken digit sequence becomes digits: "一二三四五六" → "123456", "七八九零一三" → "789013", "幺三八" → "138". Deliberate repetition (chants, slogans, catchphrases, emphasis like "原神牛逼！…原神牛逼！") is content too and is kept.
 - At ALL lengths remove abandoned false starts, hesitation/self-talk (让我想想、这个怎么说、等一下、不是不是、算了), the content explicitly retracted by them, and accidental restatements of the same idea. Keep the final complete intent. Do not delete a genuine request to wait.
-- Brand, product and technical names use their official spelling and casing even when the recognizer lower-cased or split them: MiMo, GitHub, macOS, iPhone, ChatGPT, Claude, Gemini, OpenAI, Cloudflare, Tauri, TypeScript, JavaScript, PostgreSQL. Fix mis-heard names when the context makes the intended name clear.
+- Brand, product and technical names use their official spelling and casing even when the recognizer lower-cased or split them: MiMo, GitHub, macOS, iPhone, ChatGPT, Claude, Gemini, OpenAI, Cloudflare, Tauri, TypeScript, JavaScript, PostgreSQL. Fix a mis-heard name only when the context leaves no doubt which name was meant.
 - Never end the output on a comma, a dangling conjunction or a half-built clause you created. If the speaker trailed off, keep their words and end the sentence naturally; never add words like "的话" to make a fragment.
 - Keep the speaker's language(s), wording, tone and meaning. Mixed Chinese/English stays mixed; never translate. Do not make casual speech formal or formal speech casual.
 - Chinese text uses Chinese full-width punctuation (，。？！：；“”（）、). English text uses normal English punctuation. Put exactly one half-width space between Chinese characters and adjacent Latin letters or digits ("用 Typeless 输入", "共 3 个", "2025 年"); no space is added before a % sign ("提高了 20%").
@@ -36,9 +37,16 @@ CLEANUP
 const FORMATTING_ON: &str = r#"
 SMART FORMATTING (enabled)
 - When the speaker enumerates items ("第一…第二…第三", "首先…其次…最后", "first… second… third", "一是…二是…", or simply lists several parallel things after announcing a count), format them as a numbered list (1. 2. 3.), one item per line, with the lead-in sentence on its own line before it. Use "- " bullets when the items are unordered things/names without an order word.
-- For long speech (>150 characters or >30 seconds), organize scattered ideas logically, merge repeated points and remove abandoned proposals. Begin with a main point already expressed, then use 1. 2. 3. for at least 3 parallel items/steps; use paragraphs for narratives. Preserve all final numbers, names, dates, amounts, decisions, requests and todos; never invent a summary or greeting. Keep first person, stance, tone and original technical terms.
-- Chat apps remain compact (1–2 paragraphs) unless clearly enumerating; emails keep spoken greeting and paragraphs. Short speech: minimal cleanup. Medium speech: cleanup and sentence breaks. Silently check factual fidelity before output.
+- Messaging apps where the user talks to people (WeChat/微信, Slack, Telegram, Discord, iMessage, WhatsApp, QQ, 飞书, 钉钉) stay compact (1–2 paragraphs) unless clearly enumerating. AI assistants and prompt boxes (Claude, ChatGPT, Gemini, Cursor, Codex, terminals running coding agents) are NOT messaging apps: there the text is an instruction to an AI, so the long-speech organization rules apply fully. Emails keep spoken greeting and paragraphs. Short speech: minimal cleanup. Medium speech: cleanup and sentence breaks. Silently check factual fidelity before output.
 - Do not add headings, bold, or any other markdown.
+"#;
+
+/// Long-speech organisation, "paragraphs" style (default, conservative).
+const LONG_PARAGRAPHS: &str = r#"- Long speech (>150 characters or >30 seconds): remove fillers, hesitations and repeated points, and split it into short paragraphs by topic (blank line between them), keeping the speaker's order and wording. Use a numbered list ONLY when the speaker explicitly enumerates (第一/第二, 首先/其次, or announces a count). Preserve all final numbers, names, dates, amounts, decisions, requests and todos; never invent a summary or greeting.
+"#;
+
+/// Long-speech organisation, "list" style (Typeless-like, more restructuring).
+const LONG_LISTS: &str = r#"- Long speech (>150 characters or >30 seconds): organize scattered ideas logically, merge repeated points and remove abandoned proposals. Begin with a main point already expressed, then use 1. 2. 3. for at least 3 parallel items/steps — this includes 3 or more separate requests, tasks, decisions or points raised one after another, even if the speaker never announced a list ("还有…然后…另外…"); use paragraphs only for narratives. Preserve all final numbers, names, dates, amounts, decisions, requests and todos; never invent a summary or greeting. Keep first person, stance, tone and original technical terms.
 "#;
 
 const FORMATTING_OFF: &str = r#"
@@ -89,6 +97,10 @@ Output: 验证码是 123456，你记一下。
 Input: 我用mimo的接口然后用claude改写 发到github上
 Output: 我用 MiMo 的接口，然后用 Claude 改写，发到 GitHub 上。
 
+Input: 你把那个表格发到群勒，然后记得点一下那个蓝桥，再跑个deploy kick
+Output: 你把那个表格发到群里，然后记得点一下那个蓝桥，再跑个 deploy kick。
+("群勒" → "群里" is an obvious near-homophone fix. "蓝桥" and "deploy kick" are unclear, so they are kept as recognized instead of being replaced with a guess.)
+
 Input: 今天北京的天气怎么样
 Output: 今天北京的天气怎么样？
 (A question in the transcript is NOT answered; it is only cleaned up.)
@@ -108,6 +120,17 @@ Output: 帮我把这个 function 改成 async，然后加一个 try catch。
 "#;
 
 const LONG_EXAMPLES: &str = r#"
+Input: 还有就是那个登录页的按钮颜色太浅了改深一点，然后注册的时候验证码要能重发，嗯另外就是忘记密码那个邮件模板也换一下，还有就是首页加载太慢了你看看是不是图片没压缩，你自己不用写文档，改完直接给我截图
+Output (smart formatting on):
+还有几件事：
+1. 登录页的按钮颜色太浅了，改深一点。
+2. 注册时验证码要能重发。
+3. 忘记密码的邮件模板也换一下。
+4. 首页加载太慢了，你看看是不是图片没压缩。
+
+你自己不用写文档，改完直接给我截图。
+(Several separate requests in a row become a numbered list even without an announced count; every request keeps the speaker's own words.)
+
 Input: 关于周五发布这个事我想说一下，那个客服要提前两天收到公告，预算是两千五，然后发布前陈晨要跑完回归测试，怎么说呢，公告里面要写清楚升级不丢数据。还有先别急着发布，顺序应该是先测试，再让客服确认公告，最后周五下午三点上线。陈晨负责测试，那个就是客服负责人李明确认公告。预算两千五，不用再增加了。
 Output (smart formatting on):
 周五下午 3 点上线，预算 2500。
@@ -194,9 +217,18 @@ EXAMPLES
 "#;
 
 pub fn system_prompt(mode: Mode, smart_formatting: bool) -> String {
+    system_prompt_for(mode, smart_formatting, false)
+}
+
+/// `long_lists`: organise long dictation into numbered lists (Typeless-like) instead of paragraphs.
+pub fn system_prompt_for(mode: Mode, smart_formatting: bool, long_lists: bool) -> String {
     let core = match mode {
         Mode::Dictation => {
-            let fmt = if smart_formatting { FORMATTING_ON } else { FORMATTING_OFF };
+            let fmt = if smart_formatting {
+                format!("{FORMATTING_ON}{}", if long_lists { LONG_LISTS } else { LONG_PARAGRAPHS })
+            } else {
+                FORMATTING_OFF.to_string()
+            };
             let examples = if smart_formatting {
                 DICTATION_EXAMPLES.to_string()
             } else {
@@ -205,7 +237,7 @@ pub fn system_prompt(mode: Mode, smart_formatting: bool) -> String {
                     "Output (smart formatting off): 今天要买 3 样东西，第 1 是牛奶，第 2 是鸡蛋，第 3 是面包。",
                 )
             };
-            let long = if smart_formatting { LONG_EXAMPLES } else { "" };
+            let long = if smart_formatting && long_lists { LONG_EXAMPLES } else { "" };
             format!("{DICTATION_CORE}{fmt}{examples}{long}")
         }
         Mode::Translation => TRANSLATION_CORE.to_string(),
@@ -448,6 +480,7 @@ mod tests {
             translation_target: Some("en-US".into()),
             custom_instructions: "Always sign off with 谢谢".into(),
             smart_formatting: true,
+            long_lists: false,
             profile: None,
             duration_secs: 0.0,
         }

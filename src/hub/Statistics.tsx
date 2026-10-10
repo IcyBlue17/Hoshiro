@@ -1,19 +1,23 @@
 import { useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
 import { api } from "../lib/ipc";
-import { EVENTS, type UsageBucket, type UsageStats } from "../lib/types";
+import { EVENTS, type UsageStats } from "../lib/types";
 import { useBackendEvent } from "./hooks";
 import { BigNumber } from "./Home";
+import { useApp } from "./store";
 import { Segmented, Spinner } from "./ui";
-import { formatDuration, formatWords } from "./format";
+import { formatDuration, formatWords, shortcutLabel } from "./format";
+import { AppsCard, AsrTable, LlmTable, ModeCard, OutcomeCard, SpeedCard, TimeCard, TrendCard } from "./stats/cards";
+import { num, tokenText } from "./stats/util";
 
-const number = (n: number) => n.toLocaleString("zh-CN");
-const modes: Record<string, string> = {
-  dictation: "口述",
-  translation: "翻译",
-  ask: "问任何问题",
-};
+const rise = (i: number) => ({
+  initial: { opacity: 0, y: 10 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.28, delay: 0.04 * i, ease: "easeOut" as const },
+});
 
 export function StatisticsPage() {
+  const { settings } = useApp();
   const [range, setRange] = useState("30");
   const [data, setData] = useState<UsageStats | null>(null);
   const [error, setError] = useState("");
@@ -40,29 +44,14 @@ export function StatisticsPage() {
     };
   }, [range]);
   useBackendEvent(EVENTS.statsUpdated, load);
-  const total = data?.total;
-  const chartDays = data?.days.slice(-60) ?? [];
-  const chartMax = Math.max(1, ...chartDays.map((d) => d.words));
-  const bars = (items: UsageBucket[]) => {
-    const max = Math.max(1, ...items.map((x) => x.words));
-    return items.length ? (
-      <div className="usage-breakdown">
-        {items.map((x) => (
-          <div key={x.label}>
-            <div className="usage-row">
-              <span>{modes[x.label] ?? x.label}</span>
-              <span>{number(x.words)} 字</span>
-            </div>
-            <div className="usage-track">
-              <div style={{ width: `${(100 * x.words) / max}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    ) : (
-      <p className="muted">还没有使用记录</p>
-    );
+
+  const sc = settings.shortcuts;
+  const shortcuts = {
+    dictation: sc.dictation[0] ? shortcutLabel(sc.dictation[0]) : "",
+    translation: sc.translation[0] ? shortcutLabel(sc.translation[0]) : "",
+    askAnything: sc.askAnything[0] ? shortcutLabel(sc.askAnything[0]) : "",
   };
+
   return (
     <div className="page-scroll usage-page">
       <div className="usage-heading">
@@ -88,147 +77,76 @@ export function StatisticsPage() {
         </p>
       )}
       {!data && !error && <Spinner />}
-      {data && total && (
-        <>
-          <div className="stat-grid">
-            <div className="card stat-card">
-              <BigNumber
-                parts={[
-                  {
-                    value: formatWords(total.inputTokens + total.outputTokens),
-                    unit: "tokens",
-                  },
-                ]}
-              />
-              <div className="stat-label">服务商已报告的用量</div>
-              <div className="usage-detail">
-                输入 {number(total.inputTokens)} · 输出{" "}
-                {number(total.outputTokens)}
-              </div>
-            </div>
-            <div className="card stat-card">
-              <BigNumber parts={formatDuration(total.audioSecs)} />
-              <div className="stat-label">已完成转录时长</div>
-              <div className="usage-detail">
-                {number(data.completedSessions)} 次已完成会话
-              </div>
-            </div>
-            <div className="card stat-card">
-              <BigNumber
-                parts={[{ value: formatWords(total.words), unit: "字" }]}
-              />
-              <div className="stat-label">生成文字</div>
-              <div className="usage-detail">口述、翻译和问答</div>
-            </div>
-            <div className="card stat-card">
-              <BigNumber
-                parts={formatDuration(
-                  Math.max(0, (total.words / 40) * 60 - total.audioSecs),
-                )}
-              />
-              <div className="stat-label">预计节省打字时间</div>
-              <div className="usage-detail">按每分钟 40 字估算</div>
-            </div>
+      {data && <Body data={data} range={Number(range)} shortcuts={shortcuts} />}
+    </div>
+  );
+}
+
+function Body({ data, range, shortcuts }: { data: UsageStats; range: number; shortcuts: Record<string, string> }) {
+  const { total, llmTotal } = data;
+  const llmTokens = llmTotal.inputTokens + llmTotal.outputTokens;
+  const saved = Math.max(0, (total.words / 40) * 60 - total.audioSecs);
+  return (
+    <div className="us-stack">
+      <div className="us-kpis">
+        <motion.div className="card stat-card" {...rise(0)}>
+          <BigNumber parts={[{ value: formatWords(total.words), unit: "字" }]} />
+          <div className="stat-label">生成文字</div>
+          <div className="usage-detail">{num(data.completedSessions)} 次已完成会话</div>
+        </motion.div>
+        <motion.div className="card stat-card" {...rise(1)}>
+          <BigNumber parts={formatDuration(total.audioSecs)} />
+          <div className="stat-label">已完成转录时长</div>
+          <div className="usage-detail">语音识别 {num(data.asrTotal.requests)} 次请求</div>
+        </motion.div>
+        <motion.div className="card stat-card" {...rise(2)}>
+          <BigNumber parts={formatDuration(saved)} />
+          <div className="stat-label">预计节省打字时间</div>
+          <div className="usage-detail">按每分钟 40 字估算</div>
+        </motion.div>
+        <motion.div className="card stat-card" {...rise(3)}>
+          <BigNumber parts={[{ value: tokenText(llmTokens), unit: "tokens" }]} />
+          <div className="stat-label">改写模型用量</div>
+          <div className="usage-detail">
+            输入 {tokenText(llmTotal.inputTokens)} · 输出 {tokenText(llmTotal.outputTokens)}
+            {llmTotal.cachedTokens > 0 && <> · 缓存 {tokenText(llmTotal.cachedTokens)}</>}
           </div>
-          <section className="card usage-section">
-            <h2 className="section-title">每天的表达</h2>
-            {data.days.length ? (
-              <div
-                className="usage-chart"
-                role="img"
-                aria-label="每日生成字数，悬停查看详情"
-              >
-                {chartDays.map((d) => (
-                  <div
-                    className="usage-day"
-                    key={d.label}
-                    title={`${d.label}：${number(d.words)} 字 · ${d.sessions} 次 · ${number(d.inputTokens + d.outputTokens)} tokens`}
-                  >
-                    <div
-                      className="usage-day-bar"
-                      style={{
-                        height: `${Math.max(2, (100 * d.words) / chartMax)}%`,
-                      }}
-                    />
-                    <span>{d.label.slice(5)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="muted">
-                开始一次口述，您的使用趋势就会出现在这里。
-              </p>
-            )}
-            <p className="usage-detail">
-              按本地日期显示，最多展示最近 60 个有记录的日期。
-            </p>
-          </section>
-          <div className="usage-columns">
-            <section className="card usage-section">
-              <h2 className="section-title">使用方式</h2>
-              {bars(data.modes)}
-            </section>
-            <section className="card usage-section">
-              <h2 className="section-title">常用应用</h2>
-              {bars(data.apps)}
-            </section>
-          </div>
-          <section className="card usage-section">
-            <h2 className="section-title">模型用量</h2>
-            <div className="usage-table-wrap">
-              <table className="usage-table">
-                <thead>
-                  <tr>
-                    <th>服务 / 模型</th>
-                    <th>请求</th>
-                    <th>输入 token</th>
-                    <th>输出 token</th>
-                    <th>送识别时长</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.providers.map((p) => (
-                    <tr key={p.label}>
-                      <td>
-                        {p.label}
-                        {p.unreportedRequests > 0 && (
-                          <div className="usage-detail">
-                            {p.unreportedRequests} 次未完整报告 token
-                          </div>
-                        )}
-                      </td>
-                      <td>{number(p.requests)}</td>
-                      <td>{number(p.inputTokens)}</td>
-                      <td>{number(p.outputTokens)}</td>
-                      <td>{Math.round(p.audioSecs)} 秒</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {!data.providers.length && (
-              <p className="muted">还没有记录到模型请求</p>
-            )}
-            <p className="usage-detail">
-              Token
-              仅累计服务商实际返回的用量，包含连接测试和个性化分析；不估算旧记录或未报告的部分。重试请求会单独计入。实际计费以服务商账单为准。
-            </p>
-          </section>
-          <section className="card usage-section usage-footnotes">
-            <div>
-              <b>{number(data.dictionaryWords)}</b>
-              <span>词典中的词 · 自动学习 {number(data.autoWords)} 个</span>
-            </div>
-            <div>
-              <b>{number(data.errorSessions)}</b>
-              <span>所选期间失败的会话</span>
-            </div>
-          </section>
-          <p className="usage-detail">
-            会话、文字、时长来自当前保留的历史（包含导入记录），删除历史会影响这些统计。模型用量独立保留，不包含文本内容；词典展示当前总量。
-          </p>
-        </>
-      )}
+        </motion.div>
+      </div>
+
+      <motion.div {...rise(4)}>
+        <TrendCard stats={data} range={range} />
+      </motion.div>
+
+      <motion.div className="us-grid" {...rise(5)}>
+        <SpeedCard stats={data} />
+        <OutcomeCard stats={data} />
+      </motion.div>
+
+      <motion.div className="us-grid" {...rise(6)}>
+        <ModeCard stats={data} shortcuts={shortcuts} />
+        <AppsCard stats={data} />
+      </motion.div>
+
+      <motion.div {...rise(7)}>
+        <TimeCard stats={data} />
+      </motion.div>
+
+      <motion.div {...rise(8)}>
+        <AsrTable rows={data.asrModels} />
+      </motion.div>
+      <motion.div {...rise(9)}>
+        <LlmTable rows={data.llmModels} />
+      </motion.div>
+
+      <div className="us-foot">
+        <span><b>{num(data.dictionaryWords)}</b> 个词典词条（自动学习 {num(data.autoWords)} 个）</span>
+        <span>所选期间失败的会话 <b>{num(data.errorSessions)}</b></span>
+      </div>
+      <p className="us-note">
+        语音识别按音频时长计费，改写模型按 token 计费。Token 只统计服务商实际返回的数字，不估算旧记录或未报告的部分，包含连接测试和个性化分析；重试请求会单独计入。实际费用以服务商账单为准。
+        会话、文字、时长和耗时来自当前保留的历史（含导入记录），删除历史会影响这些统计；模型用量独立保留，不含文本内容。
+      </p>
     </div>
   );
 }

@@ -113,6 +113,7 @@ async fn main() -> anyhow::Result<()> {
         translation_target: None,
         custom_instructions: String::new(),
         smart_formatting: true,
+        long_lists: false,
         profile: None,
         duration_secs: 0.0,
     };

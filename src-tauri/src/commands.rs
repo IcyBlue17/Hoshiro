@@ -404,8 +404,9 @@ pub async fn test_asr(config: serde_json::Value, state: State<'_, AppState>) -> 
 }
 
 #[tauri::command]
-pub async fn test_llm(provider: LlmProvider, config: LlmEndpointConfig) -> CmdResult<TestResult> {
-    Ok(crate::providers::test_llm(provider, &config).await)
+pub async fn test_llm(state: State<'_, AppState>, provider: LlmProvider, config: LlmEndpointConfig) -> CmdResult<TestResult> {
+    let effort = crate::providers::llm::Effort::parse(&state.settings().llm.reasoning_effort);
+    Ok(crate::providers::llm::test_llm_with(provider, &config, effort).await)
 }
 
 #[tauri::command]

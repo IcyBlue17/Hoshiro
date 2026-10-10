@@ -27,6 +27,7 @@ import { LanguageSettings } from "./Language";
 import { AsrForm, LlmForm } from "./Providers";
 import { PermissionRows } from "./permissions";
 import { Personalization } from "./Personalization";
+import { AboutSection } from "../about/About";
 import { useDebouncedField } from "../ui";
 
 const CATEGORIES: { key: SettingsCategory; label: string; icon: typeof Mic }[] = [
@@ -127,13 +128,13 @@ function GeneralSection() {
           ]}
         />
       </Row>
-      <Row title="在 Dock 中显示应用" desc="在您的 Mac Dock 中显示 Hoshiro 以便快速访问。">
+      <Row title="在 Dock 中显示应用">
         <Switch checked={settings.showInDock} onChange={(v) => update((d) => void (d.showInDock = v))} label="在 Dock 中显示应用" />
       </Row>
       <Row title="开机启动" desc="登录 Mac 时自动启动 Hoshiro。">
         <Switch checked={settings.launchAtLogin} onChange={(v) => update((d) => void (d.launchAtLogin = v))} label="开机启动" />
       </Row>
-      <Row title="在桌面上显示悬浮条" desc="未录音时在屏幕底部显示一个小小的待机条，点击即可开始口述。">
+      <Row title="在桌面上显示悬浮条" desc="空闲时在屏幕底部显示待机条。">
         <Switch checked={settings.showBarOnDesktop} onChange={(v) => update((d) => void (d.showBarOnDesktop = v))} label="在桌面上显示悬浮条" />
       </Row>
     </Group>
@@ -152,7 +153,7 @@ function AudioSection() {
   return (
     <>
       <Group>
-        <Row title="麦克风" desc="选择您首选的麦克风，以便 Hoshiro 捕捉您的声音。">
+        <Row title="麦克风">
           <button className="btn btn-secondary" onClick={() => setOpen(true)}>
             <Mic size={15} /> <span className="btn-ellipsis">{name}</span>
           </button>
@@ -183,15 +184,29 @@ function StyleSection() {
     <>
       <Personalization />
       <Group>
-        <Row title="智能格式化" desc="将口述的列举转成列表，长篇内容自动分段，并把口述的符号、邮箱、网址写成书面形式。">
+        <Row title="智能格式化" desc="列举转列表，邮箱、网址写成书面形式。">
           <Switch checked={settings.style.smartFormatting} onChange={(v) => update((d) => void (d.style.smartFormatting = v))} label="智能格式化" />
         </Row>
-        <Row title="自动添加到词典" desc="在您修正已输入的文字后，自动把更正后的专有名词学习到词典中。">
+        {settings.style.smartFormatting && (
+          <Row title="长段整理" desc={settings.style.longFormStyle === "list" ? "几件事连着说时整理成 1. 2. 3." : "按话题分段，尽量保留原话。"}>
+            <Segmented
+              id="long-form-style"
+              size="sm"
+              value={settings.style.longFormStyle ?? "paragraphs"}
+              onChange={(v) => update((d) => void (d.style.longFormStyle = v))}
+              options={[
+                { value: "paragraphs", label: "分段" },
+                { value: "list", label: "列点" },
+              ]}
+            />
+          </Row>
+        )}
+        <Row title="自动添加到词典" desc="修改插入的文字后，自动学习更正后的专有名词。">
           <Switch checked={settings.style.autoAddDictionary} onChange={(v) => update((d) => void (d.style.autoAddDictionary = v))} label="自动添加到词典" />
         </Row>
       </Group>
       <Group>
-        <Row title="自定义指令" desc="附加到改写提示词末尾，例如“用正式语气”“把英文标点改成中文标点”。需要开启改写。" stacked>
+        <Row title="自定义指令" desc="附加给改写模型的要求。" stacked>
           <textarea
             className="textarea"
             rows={5}
@@ -336,7 +351,7 @@ function DataSection() {
         </div>
       </Group>
       <Group title="本地数据">
-        <Row title="数据文件夹" desc="设置、历史记录与录音都存放在此设备的应用数据目录中。">
+        <Row title="数据文件夹">
           <button className="btn btn-secondary" onClick={openFolder}>
             <FolderOpen size={15} /> 打开数据文件夹
           </button>
@@ -353,27 +368,12 @@ function PermissionsSection() {
         <PermissionRows />
       </Group>
       <Group>
-        <Row title="Fn 键" desc="请将 系统设置 › 键盘 › “按下 🌐 键时” 设为 “不执行任何操作”，以免 Fn 触发系统功能。">
+        <Row title="Fn 键" desc="系统设置 › 键盘 › 按下 🌐 键时：不执行任何操作">
           <button className="btn btn-secondary" onClick={() => api.openKeyboardSettings()}>
             打开键盘设置
           </button>
         </Row>
       </Group>
     </>
-  );
-}
-
-function AboutSection() {
-  const { version } = useApp();
-  const { toast } = useFeedback();
-  return (
-    <Group>
-      <Row title="版本" desc={`Hoshiro v${version || "0.1.0"}`}>
-        <button className="btn btn-secondary" onClick={() => toast("暂不支持自动检查更新", "info")}>
-          检查更新
-        </button>
-      </Row>
-      <Row title="隐私" desc="历史记录、词典和 API Key 仅保存在此设备上；音频与文字只会发送给您自行配置的语音识别与改写服务商。" />
-    </Group>
   );
 }

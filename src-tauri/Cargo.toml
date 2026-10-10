@@ -31,6 +31,7 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 dirs = "6"
+keyring = "4"  # OS credential store (Keychain / Credential Manager / Secret Service)
 
 # ── audio + providers (owned by audio/providers agent) ──
 cpal = "0.16"
@@ -39,7 +40,6 @@ rodio = { version = "0.21", default-features = false, features = ["wav", "playba
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 base64 = "0.22"
 futures-util = "0.3"
-cloudflare = { version = "0.14", default-features = false, features = ["rustls-tls"] }
 google-cloud-speech-v2 = { version = "1.15", default-features = false }
 google-cloud-auth = { version = "1", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

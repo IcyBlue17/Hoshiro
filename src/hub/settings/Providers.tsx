@@ -1,9 +1,9 @@
 import { useRef, useState } from "react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { api } from "../../lib/ipc";
-import type { AsrConfig, LlmProvider } from "../../lib/types";
+import type { AsrConfig, LlmEndpointConfig, LlmProvider, ReasoningEffort } from "../../lib/types";
 import { useApp } from "../store";
-import { Popover, Segmented, Switch } from "../ui";
+import { Popover, Segmented, Select, Switch } from "../ui";
 import { Group, Row, SecretInput, TestButton, TextField, useTester } from "./shared";
 
 export const MIMO_GLOBAL = "https://api.xiaomimimo.com/v1";
@@ -30,6 +30,41 @@ export function AsrForm() {
   </>;
 }
 
+/** Cloudflare Workers AI speech models. Edit labels here. */
+export const CLOUDFLARE_ASR_MODELS: { value: string; label: string }[] = [
+  { value: "@cf/openai/whisper-large-v3-turbo", label: "Whisper Large v3 Turbo（推荐）" },
+  { value: "@cf/openai/whisper", label: "Whisper 旧版（较快，偶尔繁体）" },
+  { value: "@cf/deepgram/nova-3", label: "Deepgram Nova-3（仅英文）" },
+];
+const CUSTOM = "__custom__";
+
+function CloudflareModel() {
+  const { settings, update } = useApp();
+  const model = settings.asr.cloudflare.model;
+  const isPreset = CLOUDFLARE_ASR_MODELS.some((m) => m.value === model);
+  const [custom, setCustom] = useState(!isPreset);
+  const selected = custom || !isPreset ? CUSTOM : model;
+  const commit = (v: string) => update((d) => void (d.asr.cloudflare.model = v.trim()));
+  return (
+    <div className="cf-model">
+      <Select
+        value={selected}
+        width={300}
+        align="end"
+        options={[...CLOUDFLARE_ASR_MODELS, { value: CUSTOM, label: "自定义…" }]}
+        onChange={(v) => {
+          if (v === CUSTOM) return setCustom(true);
+          setCustom(false);
+          commit(v);
+        }}
+      />
+      {selected === CUSTOM && (
+        <TextField label="自定义 Cloudflare 模型" value={model} mono width={300} placeholder="@cf/…" onCommit={commit} />
+      )}
+    </div>
+  );
+}
+
 function OtherAsrForm() {
   const { settings, update } = useApp();
   const provider = settings.asr.provider;
@@ -39,22 +74,22 @@ function OtherAsrForm() {
     {provider === "cloudflare" && <>
       <Row title="账户 ID"><TextField label="Cloudflare 账户 ID" value={c.cloudflare.accountId} onCommit={(v) => update((d) => void (d.asr.cloudflare.accountId = v.trim()))} width={300} /></Row>
       <Row title="API Token" desc="需要 Workers AI 读取/运行权限。"><SecretInput label="Cloudflare API Token" value={c.cloudflare.apiKey} onCommit={(v) => update((d) => void (d.asr.cloudflare.apiKey = v.trim()))} width={300} /></Row>
-      <Row title="Whisper 模型"><TextField label="Cloudflare 模型" value={c.cloudflare.model} onCommit={(v) => update((d) => void (d.asr.cloudflare.model = v.trim()))} width={300} /></Row>
+      <Row title="识别模型"><CloudflareModel /></Row>
     </>}
     {provider === "azure" && <>
       <Row title="Speech Key"><SecretInput label="Azure Speech Key" value={c.azure.apiKey} onCommit={(v) => update((d) => void (d.asr.azure.apiKey = v.trim()))} width={300} /></Row>
       <Row title="区域" desc="须与 Speech 资源区域一致，例如 eastasia。"><TextField label="Azure 区域" value={c.azure.region} onCommit={(v) => update((d) => void (d.asr.azure.region = v.trim()))} width={300} /></Row>
-      <Row title="实时识别" desc="边说边发送音频，使用词典提示；多语言从听写语言中取前 4 种。" />
+      <Row title="实时识别" desc="流式识别，边说边传。" />
     </>}
     {provider === "google" && <>
       <Row title="项目 ID"><TextField label="Google 项目 ID" value={c.google.projectId} onCommit={(v) => update((d) => void (d.asr.google.projectId = v.trim()))} width={300} /></Row>
       <Row title="区域" desc="区域须支持所选模型，例如 global、us 或 eu。"><TextField label="Google 区域" value={c.google.location} onCommit={(v) => update((d) => void (d.asr.google.location = v.trim()))} width={300} /></Row>
       <Row title="模型"><TextField label="Google 模型" value={c.google.model} onCommit={(v) => update((d) => void (d.asr.google.model = v.trim()))} width={300} /></Row>
       <Row title="API Key" desc="使用服务账户时可留空；项目需已启用 Speech-to-Text。"><SecretInput label="Google API Key" value={c.google.apiKey} onCommit={(v) => update((d) => void (d.asr.google.apiKey = v.trim()))} width={300} /></Row>
-      <Row title="服务账户 JSON" desc="与 API Key 二选一，填写后优先使用服务账户；仅保存在本机。" stacked>
+      <Row title="服务账户 JSON" desc="与 API Key 二选一，优先使用服务账户。" stacked>
         <SecretInput label="Google 服务账户 JSON" value={c.google.serviceAccountJson} onCommit={(v) => update((d) => void (d.asr.google.serviceAccountJson = v.trim()))} width={400} placeholder="粘贴服务账户 JSON" />
       </Row>
-      <Row title="实时识别" desc="使用 Google 官方 SDK，支持词典提示；多语言取听写语言中的前 3 种，具体支持取决于所选模型和区域。" />
+      <Row title="实时识别" desc="流式识别，边说边传。" />
     </>}
     <Row title="连接测试" desc="发送一小段静音验证配置，可能产生少量用量。"><TestButton tester={tester} disabled={!asrReady(c)} /></Row>
   </Group>;
@@ -113,10 +148,17 @@ function MimoForm() {
   );
 }
 
-const PROVIDERS: { value: LlmProvider; label: string; keyHint: string; urlHint: string }[] = [
+export const PROVIDERS: { value: LlmProvider; label: string; keyHint: string; urlHint: string }[] = [
   { value: "gemini", label: "Gemini", keyHint: "Google AI Studio API Key", urlHint: "留空使用官方地址 generativelanguage.googleapis.com" },
   { value: "anthropic", label: "Anthropic", keyHint: "Anthropic API Key", urlHint: "留空使用官方地址 api.anthropic.com" },
   { value: "openai", label: "OpenAI 兼容", keyHint: "API Key", urlHint: "必填，例如 https://api.openai.com/v1" },
+];
+
+export const EFFORT_OPTIONS: { value: ReasoningEffort; label: string }[] = [
+  { value: "off", label: "关闭" },
+  { value: "low", label: "低" },
+  { value: "medium", label: "中" },
+  { value: "high", label: "高" },
 ];
 
 export function LlmForm() {
@@ -129,7 +171,7 @@ export function LlmForm() {
 
   return (
     <Group title="改写（AI 润色）">
-      <Row title="启用改写" desc="关闭后将直接输入原始转录，不经过 AI 润色、翻译和提问。">
+      <Row title="启用改写" desc="关闭后直接输入原始转录。">
         <Switch checked={llm.enabled} onChange={(v) => update((d) => void (d.llm.enabled = v))} label="启用改写" />
       </Row>
       <Row title="服务商" disabled={off}>
@@ -143,6 +185,25 @@ export function LlmForm() {
         />
       </Row>
       <ProviderFields key={provider} provider={provider} info={info} disabled={off} cfg={cfg} />
+      <Row
+        title="思考强度"
+        disabled={off}
+        desc={
+          <>
+            推荐关闭。开启后会明显变慢，效果提升有限。
+            {llm.reasoningEffort !== "off" && <div className="effort-warn">不推荐：会明显变慢</div>}
+          </>
+        }
+      >
+        <Segmented
+          id="llm-effort"
+          size="sm"
+          disabled={off}
+          value={llm.reasoningEffort}
+          onChange={(v) => update((d) => void (d.llm.reasoningEffort = v))}
+          options={EFFORT_OPTIONS}
+        />
+      </Row>
       <Row title="超时" desc="超过该时间仍未返回时，改为输入原始转录。" disabled={off}>
         <div className="unit-input">
           <TextField
@@ -175,6 +236,50 @@ function ProviderFields({
 }) {
   const { update } = useApp();
   const tester = useTester(() => api.testLlm(provider, cfg));
+  const set = (field: "apiKey" | "baseUrl" | "model", v: string) =>
+    update((d) => void (d.llm[provider][field] = v.trim()));
+
+  return (
+    <>
+      <Row title="API Key" desc={info.keyHint} disabled={disabled}>
+        <SecretInput value={cfg.apiKey} onCommit={(v) => set("apiKey", v)} width={300} disabled={disabled} />
+      </Row>
+      <Row title="接口地址" desc={info.urlHint} disabled={disabled}>
+        <TextField
+          value={cfg.baseUrl}
+          mono
+          width={300}
+          disabled={disabled}
+          placeholder={provider === "openai" ? "https://api.openai.com/v1" : "默认"}
+          onCommit={(v) => set("baseUrl", v)}
+        />
+      </Row>
+      <Row title="模型" disabled={disabled}>
+        <ModelInput provider={provider} cfg={cfg} value={cfg.model} disabled={disabled} onPick={(m) => set("model", m)} />
+      </Row>
+      <Row title="连接测试" disabled={disabled}>
+        <TestButton tester={tester} disabled={disabled || !cfg.apiKey} />
+      </Row>
+    </>
+  );
+}
+
+/** Model text field + 「获取模型列表」 dropdown. Credentials/base URL come from `cfg`. */
+export function ModelInput({
+  provider,
+  cfg,
+  value,
+  onPick,
+  disabled,
+  placeholder,
+}: {
+  provider: LlmProvider;
+  cfg: LlmEndpointConfig;
+  value: string;
+  onPick: (model: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
   const [models, setModels] = useState<string[] | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelErr, setModelErr] = useState<string | null>(null);
@@ -196,59 +301,36 @@ function ProviderFields({
     }
   };
 
-  const set = (field: "apiKey" | "baseUrl" | "model", v: string) =>
-    update((d) => void (d.llm[provider][field] = v.trim()));
-
   return (
-    <>
-      <Row title="API Key" desc={info.keyHint} disabled={disabled}>
-        <SecretInput value={cfg.apiKey} onCommit={(v) => set("apiKey", v)} width={300} disabled={disabled} />
-      </Row>
-      <Row title="接口地址" desc={info.urlHint} disabled={disabled}>
-        <TextField
-          value={cfg.baseUrl}
-          mono
-          width={300}
-          disabled={disabled}
-          placeholder={provider === "openai" ? "https://api.openai.com/v1" : "默认"}
-          onCommit={(v) => set("baseUrl", v)}
-        />
-      </Row>
-      <Row title="模型" disabled={disabled}>
-        <div className="model-field">
-          <TextField key={modelKey} value={cfg.model} mono width={300} disabled={disabled} onCommit={(v) => set("model", v)} />
-          <button ref={btnRef} className="btn btn-secondary btn-sm" disabled={disabled || !cfg.apiKey} onClick={fetchModels}>
-            获取模型列表 <ChevronDown size={14} />
-          </button>
-          <Popover open={open} onClose={() => setOpen(false)} anchorRef={btnRef} align="end" minWidth={260}>
-            <div className="menu-list models-list">
-              {loadingModels && (
-                <div className="menu-note">
-                  <Loader2 size={14} className="spin" /> 正在获取…
-                </div>
-              )}
-              {modelErr && <div className="menu-note bad">{modelErr}</div>}
-              {!loadingModels && !modelErr && models?.length === 0 && <div className="menu-note">没有可用的模型</div>}
-              {models?.map((m) => (
-                <button
-                  key={m}
-                  className={`menu-item ${m === cfg.model ? "selected" : ""}`}
-                  onClick={() => {
-                    set("model", m);
-                    setModelKey((k) => k + 1);
-                    setOpen(false);
-                  }}
-                >
-                  <span className="menu-item-label mono">{m}</span>
-                </button>
-              ))}
+    <div className="model-field">
+      <TextField key={modelKey} value={value} mono width={300} disabled={disabled} placeholder={placeholder} onCommit={onPick} />
+      <button ref={btnRef} className="btn btn-secondary btn-sm" disabled={disabled || !cfg.apiKey} onClick={fetchModels}>
+        获取模型列表 <ChevronDown size={14} />
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={btnRef} align="end" minWidth={260}>
+        <div className="menu-list models-list">
+          {loadingModels && (
+            <div className="menu-note">
+              <Loader2 size={14} className="spin" /> 正在获取…
             </div>
-          </Popover>
+          )}
+          {modelErr && <div className="menu-note bad">{modelErr}</div>}
+          {!loadingModels && !modelErr && models?.length === 0 && <div className="menu-note">没有可用的模型</div>}
+          {models?.map((m) => (
+            <button
+              key={m}
+              className={`menu-item ${m === value ? "selected" : ""}`}
+              onClick={() => {
+                onPick(m);
+                setModelKey((k) => k + 1);
+                setOpen(false);
+              }}
+            >
+              <span className="menu-item-label mono">{m}</span>
+            </button>
+          ))}
         </div>
-      </Row>
-      <Row title="连接测试" disabled={disabled}>
-        <TestButton tester={tester} disabled={disabled || !cfg.apiKey} />
-      </Row>
-    </>
+      </Popover>
+    </div>
   );
 }

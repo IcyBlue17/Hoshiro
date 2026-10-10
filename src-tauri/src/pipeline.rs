@@ -300,6 +300,7 @@ async fn rewrite_stage(
         translation_target: (mode == Mode::Translation).then(|| settings.translation_targets.first().cloned()).flatten(),
         custom_instructions: settings.style.custom_instructions.clone(),
         smart_formatting: settings.style.smart_formatting,
+        long_lists: settings.style.long_form_style == "list",
         profile: if settings.style.ai_personalization { app.state::<AppState>().db.profile().ok() } else { None },
         duration_secs,
     };
@@ -336,6 +337,26 @@ async fn rewrite_stage(
             }
         }
     }
+}
+
+/// "Provider · model", identical to the label the usage table builds for the same request.
+fn asr_label(s: &Settings) -> String {
+    match s.asr.provider.as_str() {
+        "cloudflare" => format!("Cloudflare · {}", s.asr.cloudflare.model),
+        "azure" => "Azure Speech · streaming".into(),
+        "google" => format!("Google Speech · {}", s.asr.google.model),
+        _ => format!("MiMo · {}", s.asr.mimo.model),
+    }
+}
+
+fn llm_label(s: &Settings) -> String {
+    use crate::types::LlmProvider;
+    let name = match s.llm.provider {
+        LlmProvider::Gemini => "Gemini",
+        LlmProvider::Anthropic => "Anthropic",
+        LlmProvider::Openai => "OpenAI 兼容服务",
+    };
+    format!("{name} · {}", s.llm.active_endpoint().model)
 }
 
 async fn fail(app: &AppHandle, mut row: HistoryRow, msg: String, deliver: bool, store: bool) -> Report {
@@ -447,6 +468,15 @@ pub async fn run(app: AppHandle, input: ProcessInput) -> Report {
     }
 
     // 4. history
+    if deliver {
+        // Live sessions only: a history retry would otherwise overwrite the original timings.
+        row.asr_ms = Some(asr_ms.min(u32::MAX as u128) as u32);
+        let used_llm = settings.llm.enabled && !settings.llm.active_endpoint().api_key.trim().is_empty();
+        row.llm_ms = used_llm.then(|| llm_ms.min(u32::MAX as u128) as u32);
+        row.total_ms = Some(t0.elapsed().as_millis().min(u32::MAX as u128) as u32);
+        row.asr_provider = Some(asr_label(&settings));
+        row.llm_model = used_llm.then(|| llm_label(&settings));
+    }
     row.status = "completed".into();
     row.error_message = None;
     row.words = stats::count_words(&stage.text);

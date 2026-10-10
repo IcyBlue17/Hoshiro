@@ -61,6 +61,21 @@ export interface LlmConfig {
   openai: LlmEndpointConfig; // OpenAI-compatible; baseUrl e.g. "https://api.openai.com/v1"
   /** Request timeout in seconds before falling back to the raw transcript. */
   timeoutSecs: number;
+  /** Thinking effort for interactive rewrites. "off" is fastest and recommended. */
+  reasoningEffort: ReasoningEffort;
+  /** Model used by the background personalization analysis. */
+  personalization: PersonalizationLlm;
+}
+
+export type ReasoningEffort = "off" | "low" | "medium" | "high";
+
+export interface PersonalizationLlm {
+  /** Use the rewrite provider + model; credentials always come from that provider's endpoint config. */
+  followRewrite: boolean;
+  provider: LlmProvider;
+  /** Empty = that provider's configured rewrite model. */
+  model: string;
+  reasoningEffort: ReasoningEffort;
 }
 
 export interface StyleConfig {
@@ -72,6 +87,8 @@ export interface StyleConfig {
   autoAddDictionary: boolean;
   /** Periodically let the rewrite model analyse history + edits and build a personal profile. */
   aiPersonalization: boolean;
+  /** How long dictation is organised: "paragraphs" (conservative, default) or "list" (Typeless-like numbered lists). */
+  longFormStyle: "paragraphs" | "list";
 }
 
 export interface Settings {
@@ -332,7 +349,30 @@ export interface UsageBucket {
   inputTokens: number;
   outputTokens: number;
   requests: number;
+  /** LLM requests with no token usage in the response (never set for speech recognition). */
   unreportedRequests: number;
+  /** "asr" | "llm" | "" */
+  kind: string;
+  cachedTokens: number;
+  medianMs: number | null;
+  latencySamples: number;
+}
+export interface LatencyStat {
+  samples: number;
+  medianMs: number;
+  p90Ms: number;
+  meanMs: number;
+}
+export interface UsageLatency {
+  total: LatencyStat;
+  asr: LatencyStat;
+  llm: LatencyStat;
+}
+export interface OutcomeCounts {
+  completed: number;
+  dismissed: number;
+  error: number;
+  empty: number;
 }
 export interface UsageStats {
   total: UsageBucket;
@@ -344,4 +384,17 @@ export interface UsageStats {
   modes: UsageBucket[];
   apps: UsageBucket[];
   providers: UsageBucket[];
+  asrTotal: UsageBucket;
+  llmTotal: UsageBucket;
+  asrModels: UsageBucket[];
+  llmModels: UsageBucket[];
+  outcomes: OutcomeCounts;
+  latency: UsageLatency;
+  /** completed sessions per local hour (24) */
+  hours: number[];
+  /** completed sessions per weekday, Monday first (7) */
+  weekdays: number[];
+  longestSessionSecs: number;
+  averageSessionSecs: number;
+  averageWordsPerSession: number;
 }

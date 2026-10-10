@@ -1,13 +1,14 @@
 //! App entry. OWNER: core agent.
 
 pub mod audio;
+pub mod config;
+pub mod secrets;
 pub mod platform;
 pub mod providers;
 pub mod types;
 
 mod autodict;
 mod commands;
-mod config;
 mod controller;
 mod db;
 mod importer;

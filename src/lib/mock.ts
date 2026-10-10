@@ -46,8 +46,10 @@ export const defaultSettings: Settings = {
     anthropic: { apiKey: "", baseUrl: "", model: "claude-haiku-5-5" },
     openai: { apiKey: "", baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
     timeoutSecs: 12,
+    reasoningEffort: "off",
+    personalization: { followRewrite: true, provider: "gemini", model: "", reasoningEffort: "medium" },
   },
-  style: { customInstructions: "", smartFormatting: true, autoAddDictionary: true, aiPersonalization: true },
+  style: { customInstructions: "", smartFormatting: true, autoAddDictionary: true, aiPersonalization: true, longFormStyle: "paragraphs" },
   onboardingCompleted: true,
 };
 
@@ -229,12 +231,29 @@ export async function mockInvoke<T>(cmd: string, args: any = {}): Promise<T> {
     case "delete_dictionary_words": dictionary = dictionary.filter((d) => !args.ids.includes(d.id)); return r(undefined);
     case "preview_dictionary_csv": return r(["Kubernetes", "Tauri", "Zustand"]);
     case "get_usage": {
-      const bucket = { label: "", sessions: 84, words: 12600, audioSecs: 3600, inputTokens: 48200, outputTokens: 16300, requests: 92, unreportedRequests: 6 };
-      return r({ total: bucket, completedSessions: 80, errorSessions: 2, dictionaryWords: dictionary.length, autoWords: dictionary.filter((w) => w.source === "auto").length,
-        days: Array.from({ length: args.days === 7 ? 7 : 30 }, (_, i) => ({ ...bucket, label: new Date(Date.now() - i * 86400000).toISOString().slice(0, 10), words: 100 + (i * 137) % 800, sessions: i % 5 + 1 })).reverse(),
-        modes: [{ ...bucket, label: "dictation", words: 9200 }, { ...bucket, label: "translation", words: 2200 }, { ...bucket, label: "ask", words: 1200 }],
-        apps: [{ ...bucket, label: "Cursor", words: 6200 }, { ...bucket, label: "微信", words: 4300 }, { ...bucket, label: "Notes", words: 2100 }],
-        providers: [{ ...bucket, label: "Gemini · gemini-flash-latest", audioSecs: 0 }, { ...bucket, label: "MiMo · mimo-v2.5-asr", inputTokens: 0, outputTokens: 0, unreportedRequests: 6 }] });
+      const n = args.days === 7 ? 7 : args.days === 0 ? 90 : 30;
+      const z = { label: "", sessions: 0, words: 0, audioSecs: 0, inputTokens: 0, outputTokens: 0, requests: 0, unreportedRequests: 0, kind: "", cachedTokens: 0, medianMs: null, latencySamples: 0 };
+      const k = n / 30;
+      const asr = { ...z, label: "MiMo · mimo-v2.5-asr", kind: "asr", requests: Math.round(60 * k), audioSecs: 3100 * k, inputTokens: 900, outputTokens: 400, medianMs: 780, latencySamples: 50 };
+      const cf = { ...z, label: "Cloudflare · @cf/openai/whisper-large-v3-turbo", kind: "asr", requests: Math.round(8 * k), audioSecs: 420 * k, medianMs: 1250, latencySamples: 8 };
+      const gem = { ...z, label: "Gemini · gemini-flash-latest", kind: "llm", requests: Math.round(70 * k), inputTokens: 48200 * k, outputTokens: 16300 * k, cachedTokens: 9000 * k, medianMs: 640, latencySamples: 60 };
+      const cl = { ...z, label: "Anthropic · claude-haiku-5-5", kind: "llm", requests: Math.round(12 * k), inputTokens: 7000 * k, outputTokens: 2100 * k, unreportedRequests: 1, medianMs: 910, latencySamples: 10 };
+      const asrTotal = { ...z, requests: asr.requests + cf.requests, audioSecs: asr.audioSecs + cf.audioSecs, inputTokens: 900, outputTokens: 400 };
+      const llmTotal = { ...z, requests: gem.requests + cl.requests, inputTokens: gem.inputTokens + cl.inputTokens, outputTokens: gem.outputTokens + cl.outputTokens, cachedTokens: gem.cachedTokens, unreportedRequests: 1 };
+      const total = { ...z, sessions: Math.round(92 * k), words: Math.round(12600 * k), audioSecs: asrTotal.audioSecs, inputTokens: llmTotal.inputTokens + 900, outputTokens: llmTotal.outputTokens + 400, requests: asrTotal.requests + llmTotal.requests, unreportedRequests: 1 };
+      const days = Array.from({ length: n }, (_, i) => ({ ...z, label: new Date(Date.now() - i * 86400000).toISOString().slice(0, 10), words: 100 + (i * 137) % 800, sessions: i % 5 + 1, audioSecs: 60 + (i * 53) % 300 })).reverse();
+      const hours = [0, 0, 0, 0, 0, 1, 2, 6, 14, 22, 18, 12, 9, 11, 19, 24, 17, 10, 8, 12, 9, 5, 2, 1].map((v) => Math.round(v * k));
+      return r({
+        total, completedSessions: Math.round(80 * k), errorSessions: 2, dictionaryWords: dictionary.length, autoWords: dictionary.filter((w) => w.source === "auto").length,
+        days,
+        modes: [{ ...z, label: "dictation", sessions: Math.round(64 * k), words: 9200 * k, audioSecs: 2800 * k }, { ...z, label: "translation", sessions: Math.round(11 * k), words: 2200 * k, audioSecs: 500 * k }, { ...z, label: "ask", sessions: Math.round(5 * k), words: 1200 * k, audioSecs: 220 * k }],
+        apps: [{ ...z, label: "Cursor", words: 4200 * k, sessions: 20 }, { ...z, label: "微信", words: 3300 * k, sessions: 30 }, { ...z, label: "Notes", words: 1900 * k, sessions: 12 }, { ...z, label: "Typeless 导入", words: 1146 * k, sessions: 9 }, { ...z, label: "Safari", words: 700 * k, sessions: 5 }, { ...z, label: "未知应用", words: 300 * k, sessions: 4 }],
+        providers: [gem, asr, cl, cf], asrTotal, llmTotal, asrModels: [asr, cf], llmModels: [gem, cl],
+        outcomes: { completed: Math.round(80 * k), dismissed: Math.round(7 * k), error: 2, empty: Math.round(3 * k) },
+        latency: { total: { samples: 58, medianMs: 1480, p90Ms: 2650, meanMs: 1710 }, asr: { samples: 58, medianMs: 820, p90Ms: 1500, meanMs: 960 }, llm: { samples: 52, medianMs: 610, p90Ms: 1180, meanMs: 700 } },
+        hours, weekdays: [18, 22, 20, 17, 15, 6, 4].map((v) => Math.round(v * k)),
+        longestSessionSecs: 184, averageSessionSecs: 38.5, averageWordsPerSession: 157,
+      });
     }
     case "get_stats": return r(mockStats());
     case "get_profile": return r(structuredClone(profile));

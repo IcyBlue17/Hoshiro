@@ -3,7 +3,7 @@ use crate::{
     db::now_ts,
     providers::llm,
     state::AppState,
-    types::{events, PersonalProfile},
+    types::{events, LlmConfig, LlmEndpointConfig, LlmProvider, PersonalProfile},
 };
 use anyhow::{bail, Context};
 use chrono::{DateTime, Duration, Utc};
@@ -61,6 +61,29 @@ pub fn sanitize(p: &mut PersonalProfile) {
     p.prompt_addendum = p.prompt_addendum.chars().take(1200).collect();
 }
 
+/// Provider, endpoint (key/base URL/model) and effort for the analysis job.
+pub(crate) fn resolve_llm(cfg: &LlmConfig) -> anyhow::Result<(LlmProvider, LlmEndpointConfig, llm::Effort)> {
+    let p = &cfg.personalization;
+    let provider = if p.follow_rewrite { cfg.provider } else { p.provider };
+    let mut ep = match provider {
+        LlmProvider::Gemini => cfg.gemini.clone(),
+        LlmProvider::Anthropic => cfg.anthropic.clone(),
+        LlmProvider::Openai => cfg.openai.clone(),
+    };
+    if !p.follow_rewrite && !p.model.trim().is_empty() {
+        ep.model = p.model.trim().to_string();
+    }
+    if ep.api_key.trim().is_empty() {
+        let name = match provider {
+            LlmProvider::Gemini => "Gemini",
+            LlmProvider::Anthropic => "Anthropic",
+            LlmProvider::Openai => "OpenAI 兼容服务",
+        };
+        bail!("请先配置个性化分析所用模型（{name}）的 API Key");
+    }
+    Ok((provider, ep, llm::Effort::parse(&p.reasoning_effort)))
+}
+
 fn next_run() -> String {
     let jitter = (uuid::Uuid::new_v4().as_u128() % (6 * 3600 + 1)) as i64;
     (Utc::now() + Duration::hours(20) + Duration::seconds(jitter)).to_rfc3339()
@@ -109,9 +132,7 @@ pub async fn run(app: &AppHandle, manual: bool) -> anyhow::Result<PersonalProfil
     if !settings.style.ai_personalization {
         bail!("请先开启 AI 个性化学习");
     }
-    if settings.llm.active_endpoint().api_key.trim().is_empty() {
-        bail!("请先配置改写模型的 API Key");
-    }
+    let (job_provider, job_ep, job_effort) = resolve_llm(&settings.llm)?;
     let mut p = state.db.profile()?;
     if !eligible(&p, manual, Utc::now()) {
         if manual {
@@ -141,7 +162,7 @@ pub async fn run(app: &AppHandle, manual: bool) -> anyhow::Result<PersonalProfil
         }
         let ids: Vec<_> = samples.iter().map(|(id, _)| id.clone()).collect();
         let raw =
-            llm::complete(settings.llm.provider, settings.llm.active_endpoint(), SYSTEM, &user, true, 120, false).await?;
+            llm::complete(job_provider, &job_ep, SYSTEM, &user, true, 120, job_effort).await?;
         let learned: Learned =
             serde_json::from_str(&llm::clean_output(&raw)).context("个性化模型没有返回约定的 JSON")?;
         p.verbal_tics = learned.verbal_tics;
@@ -215,6 +236,28 @@ mod tests {
         let next = DateTime::parse_from_rfc3339(&next_run()).unwrap();
         let hours = next.signed_duration_since(now).num_hours();
         assert!((20..=26).contains(&hours));
+    }
+
+    #[test]
+    fn resolves_personalization_model() {
+        let mut cfg = LlmConfig::default();
+        cfg.provider = LlmProvider::Anthropic;
+        cfg.anthropic.api_key = "ak".into();
+        cfg.gemini.api_key = "gk".into();
+        cfg.personalization.reasoning_effort = "high".into();
+        cfg.personalization.provider = LlmProvider::Gemini;
+        cfg.personalization.model = "gemini-3-pro".into();
+        // Follows rewrite: ignores the custom provider/model.
+        let (p, ep, e) = resolve_llm(&cfg).unwrap();
+        assert_eq!((p, ep.api_key.as_str(), ep.model.as_str(), e), (LlmProvider::Anthropic, "ak", "claude-haiku-5-5", llm::Effort::High));
+        cfg.personalization.follow_rewrite = false;
+        let (p, ep, _) = resolve_llm(&cfg).unwrap();
+        assert_eq!((p, ep.api_key.as_str(), ep.model.as_str()), (LlmProvider::Gemini, "gk", "gemini-3-pro"));
+        cfg.personalization.model = "  ".into();
+        assert_eq!(resolve_llm(&cfg).unwrap().1.model, "gemini-flash-latest");
+        cfg.personalization.provider = LlmProvider::Openai;
+        let err = resolve_llm(&cfg).unwrap_err().to_string();
+        assert!(err.contains("API Key") && err.contains("OpenAI"), "{err}");
     }
 
     #[test]

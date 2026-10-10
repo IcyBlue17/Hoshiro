@@ -7,7 +7,8 @@ pub static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(60))
-        .pool_idle_timeout(Duration::from_secs(60))
+        .pool_idle_timeout(Duration::from_secs(300))
+        .tcp_keepalive(Duration::from_secs(60))
         .tcp_nodelay(true)
         .user_agent(concat!("Hoshiro/", env!("CARGO_PKG_VERSION")))
         .build()
@@ -16,6 +17,11 @@ pub static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
             reqwest::Client::new()
         })
 });
+
+/// Stable accessor for the shared pooled client (all providers should use this).
+pub fn client() -> &'static reqwest::Client {
+    &CLIENT
+}
 
 #[derive(Debug)]
 pub struct Failure {
