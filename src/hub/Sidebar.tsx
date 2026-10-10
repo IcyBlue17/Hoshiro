@@ -1,4 +1,4 @@
-import { ASR_NAMES, asrReady as isAsrReady } from "./settings/Providers";
+import { ASR_NAMES, asrReady as isAsrReady, llmReady as isLlmReady } from "./settings/Providers";
 import { useState } from "react";
 import { motion } from "motion/react";
 import { BarChart3, AlertTriangle, BookOpen, CircleHelp, History, House, Settings as SettingsIcon } from "lucide-react";
@@ -15,7 +15,7 @@ const NAV: { page: Page; label: string; icon: typeof House }[] = [
   { page: "statistics", label: "使用统计", icon: BarChart3 },
 ];
 
-const LLM_NAMES: Record<LlmProvider, string> = { gemini: "Gemini", anthropic: "Claude", openai: "OpenAI 兼容" };
+const LLM_NAMES: Record<LlmProvider, string> = { gemini: "Gemini", anthropic: "Claude", openai: "OpenAI 兼容", cloudflare: "Cloudflare" };
 
 export function Sidebar({ page }: { page: Page }) {
   const { navigate, openSettings, settings } = useApp();
@@ -24,7 +24,7 @@ export function Sidebar({ page }: { page: Page }) {
 
   const asrReady = isAsrReady(settings.asr);
   const llm = settings.llm;
-  const llmReady = !llm.enabled || llm[llm.provider].apiKey.trim().length > 0;
+  const llmReady = isLlmReady(settings);
   const missing: string[] = [];
   if (!asrReady) missing.push(ASR_NAMES[settings.asr.provider]);
   if (!llmReady) missing.push(LLM_NAMES[llm.provider]);
@@ -110,7 +110,7 @@ export function Sidebar({ page }: { page: Page }) {
         <ModalHeader title="使用帮助" onClose={() => setHelp(false)} />
         <div className="help-list">
           {[
-            ["口述", settings.shortcuts.dictation[0] ?? "Fn", "按住说话，松开后自动输入；双击进入免提模式。"],
+            ["口述", settings.shortcuts.dictation[0] ?? "Fn", settings.shortcuts.trigger === "toggle" ? "按一下开始说话，再按一下结束并自动输入。" : "按住说话，松开后自动输入；双击进入免提模式。"],
             ["随便问", settings.shortcuts.askAnything[0] ?? "Fn+Space", "对选中的文字下指令，或直接提问。"],
             ["翻译", settings.shortcuts.translation[0] ?? "Fn+LeftShift", "把你说的话翻译成目标语言后输入。"],
             ["粘贴上一次转录", settings.shortcuts.pasteLastTranscript[0] ?? "Ctrl+Cmd+V", "再次粘贴最近一次的结果。"],

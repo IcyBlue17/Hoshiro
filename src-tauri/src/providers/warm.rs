@@ -44,6 +44,7 @@ pub(crate) fn targets(settings: &Settings) -> Vec<String> {
             LlmProvider::Gemini => "https://generativelanguage.googleapis.com",
             LlmProvider::Anthropic => "https://api.anthropic.com",
             LlmProvider::Openai => "https://api.openai.com/v1",
+            LlmProvider::Cloudflare => "https://api.cloudflare.com",
         };
         let base = if ep.base_url.trim().is_empty() { default } else { ep.base_url.as_str() };
         out.extend(origin(base));

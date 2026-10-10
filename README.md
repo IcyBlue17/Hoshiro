@@ -44,7 +44,7 @@
 | 类别 | 服务商 |
 |---|---|
 | 语音识别 | 小米 MiMo（推荐中文）、Cloudflare Workers AI (Whisper)、Azure Speech（流式）、Google Cloud Speech（流式） |
-| AI 润色 | Google Gemini、Anthropic Claude、OpenAI 兼容接口（含 DeepSeek、OpenRouter 等） |
+| AI 润色 | Google Gemini、Anthropic Claude、Cloudflare Workers AI、OpenAI 兼容接口（内置 DeepSeek、OpenRouter、智谱、Kimi、百炼、Ollama 等预设） |
 
 详细配置说明见[使用指南](docs/guide.md#服务商配置)。
 

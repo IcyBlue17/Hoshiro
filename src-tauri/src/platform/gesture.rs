@@ -2,7 +2,7 @@
 //! No OS calls in here — everything is driven by explicit events and timestamps so it is unit-testable.
 
 use super::hotkey::{HotkeyAction, SessionPhase};
-use crate::types::{Mode, ShortcutBindings};
+use crate::types::{Mode, ShortcutBindings, TriggerMode};
 
 pub type KeyName = &'static str;
 
@@ -371,6 +371,8 @@ pub struct GestureMachine {
     pending_tap: Option<u64>,
     assumed: Option<(SessionPhase, u64)>,
     mode: Mode,
+    /// Toggle trigger: every start behaves as if the hands-free lock were already engaged.
+    toggle: bool,
 }
 
 fn compile(list: &[String], what: &str) -> Vec<Binding> {
@@ -397,6 +399,7 @@ impl GestureMachine {
         self.ask = compile(&b.ask_anything, "askAnything");
         self.translation = compile(&b.translation, "translation");
         self.paste_last = compile(&b.paste_last_transcript, "pasteLastTranscript");
+        self.toggle = b.trigger == TriggerMode::Toggle;
         self.ptt = None;
         self.pending_tap = None;
     }
@@ -564,11 +567,13 @@ impl GestureMachine {
     fn down_startable(&mut self, key: KeyName, t: u64, out: &mut Outcome) {
         match self.find(&self.dictation, key) {
             Found::Hit { used } => {
+                // In toggle mode `ptt` stays set while the key is held, only as the other-key guard (see `down_locked`).
                 self.ptt = Some(Ptt { keys: used, down_at: t });
                 self.pending_tap = None;
                 self.mode = Mode::Dictation;
-                self.assume(SessionPhase::RecordingPtt, t);
-                out.actions.push(HotkeyAction::Start { mode: Mode::Dictation, locked: false });
+                let locked = self.toggle;
+                self.assume(if locked { SessionPhase::RecordingLocked } else { SessionPhase::RecordingPtt }, t);
+                out.actions.push(HotkeyAction::Start { mode: Mode::Dictation, locked });
                 self.swallow_if_regular(key, out);
                 return;
             }
@@ -644,11 +649,20 @@ impl GestureMachine {
                 self.finish_locked(used, t, out, key);
             } else {
                 self.mode = mode;
+                self.ptt = None;
                 out.actions.push(HotkeyAction::SwitchMode { mode });
                 self.swallow_if_regular(key, out);
             }
         } else if self.mode_combo_blocked(key) {
             self.swallow_if_regular(key, out);
+        } else if let Some(ptt) = self.ptt.as_ref() {
+            // Toggle mode, dictation key still held from the start press: same "used as a modifier" rule as push-to-talk,
+            // so Fn+Arrow / Fn+F5 never leave a stuck recording. Once the key is released this no longer applies.
+            if !ptt.keys.contains(&key) && !self.is_dictation_key(key) && t.saturating_sub(ptt.down_at) < OTHER_KEY_WINDOW_MS {
+                self.ptt = None;
+                self.assume(SessionPhase::Idle, t);
+                out.actions.push(HotkeyAction::CancelSilently);
+            }
         }
     }
 
@@ -752,7 +766,17 @@ mod tests {
 
     fn bindings(d: &[&str], a: &[&str], tr: &[&str], p: &[&str]) -> ShortcutBindings {
         let v = |x: &[&str]| x.iter().map(|s| s.to_string()).collect();
-        ShortcutBindings { dictation: v(d), ask_anything: v(a), translation: v(tr), paste_last_transcript: v(p) }
+        ShortcutBindings {
+            trigger: TriggerMode::Hold,
+            dictation: v(d),
+            ask_anything: v(a),
+            translation: v(tr),
+            paste_last_transcript: v(p),
+        }
+    }
+
+    fn toggle_sim() -> Sim {
+        Sim::new(&ShortcutBindings { trigger: TriggerMode::Toggle, ..ShortcutBindings::default() })
     }
 
     /// Simulates the controller: its phase follows the actions immediately.
@@ -803,6 +827,105 @@ mod tests {
 
     fn start(mode: Mode, locked: bool) -> Vec<HotkeyAction> {
         vec![HotkeyAction::Start { mode, locked }]
+    }
+
+    #[test]
+    fn toggle_press_release_keeps_recording_and_second_press_finishes() {
+        let mut s = toggle_sim();
+        assert_eq!(s.down("Fn", 0).actions, start(Mode::Dictation, true));
+        assert_eq!(s.phase, RecordingLocked);
+        assert!(s.up("Fn", 80).actions.is_empty());
+        assert_eq!(s.m.next_deadline(), None);
+        // A long hold-then-release also does nothing.
+        assert!(s.advance(5000).is_empty());
+        assert_eq!(s.phase, RecordingLocked);
+        assert_eq!(s.down("Fn", 100).actions, vec![HotkeyAction::Finish]);
+        assert!(s.up("Fn", 80).actions.is_empty());
+        assert_eq!(s.phase, Processing);
+    }
+
+    #[test]
+    fn toggle_long_hold_release_does_not_finish() {
+        let mut s = toggle_sim();
+        s.down("Fn", 0);
+        assert!(s.up("Fn", 2000).actions.is_empty());
+        assert_eq!(s.phase, RecordingLocked);
+    }
+
+    #[test]
+    fn toggle_translation_and_ask_combos() {
+        for (key, mode) in [("LeftShift", Mode::Translation), ("Space", Mode::Ask)] {
+            let mut s = toggle_sim();
+            s.down("Fn", 0);
+            assert_eq!(s.down(key, 100).actions, vec![HotkeyAction::SwitchMode { mode }]);
+            s.up(key, 50);
+            assert!(s.up("Fn", 50).actions.is_empty());
+            assert_eq!(s.phase, RecordingLocked);
+            assert_eq!(s.down("Fn", 3000).actions, vec![HotkeyAction::Finish]);
+            s.up("Fn", 50);
+        }
+    }
+
+    #[test]
+    fn toggle_mode_combo_pressed_again_finishes() {
+        let mut s = toggle_sim();
+        s.down("LeftShift", 0);
+        assert_eq!(s.down("Fn", 20).actions, start(Mode::Translation, true));
+        s.up("Fn", 50);
+        s.up("LeftShift", 20);
+        s.down("LeftShift", 1000);
+        assert_eq!(s.down("Fn", 20).actions, vec![HotkeyAction::Finish]);
+    }
+
+    #[test]
+    fn toggle_esc_cancels() {
+        let mut s = toggle_sim();
+        s.down("Fn", 0);
+        s.up("Fn", 60);
+        let o = s.down("Esc", 500);
+        assert_eq!(o.actions, vec![HotkeyAction::Cancel]);
+        assert_eq!(s.phase, Idle);
+    }
+
+    #[test]
+    fn toggle_fn_as_modifier_cancels_silently() {
+        let mut s = toggle_sim();
+        s.down("Fn", 0);
+        assert_eq!(s.down("Right", 200).actions, vec![HotkeyAction::CancelSilently]);
+        assert_eq!(s.phase, Idle);
+        s.up("Right", 50);
+        assert!(s.up("Fn", 50).actions.is_empty());
+        assert_eq!(s.phase, Idle);
+    }
+
+    #[test]
+    fn toggle_other_key_after_release_or_window_is_ignored() {
+        // Released: typing afterwards must not cancel the hands-free recording.
+        let mut s = toggle_sim();
+        s.down("Fn", 0);
+        s.up("Fn", 60);
+        assert!(s.down("A", 200).actions.is_empty());
+        assert_eq!(s.phase, RecordingLocked);
+        // Still held but past the window: user is talking.
+        let mut s = toggle_sim();
+        s.down("Fn", 0);
+        assert!(s.down("A", OTHER_KEY_WINDOW_MS + 10).actions.is_empty());
+        assert_eq!(s.phase, RecordingLocked);
+    }
+
+    #[test]
+    fn toggle_does_not_wait_for_double_press() {
+        let mut s = toggle_sim();
+        s.down("Fn", 0);
+        s.up("Fn", 50);
+        assert_eq!(s.m.next_deadline(), None);
+    }
+
+    #[test]
+    fn hold_mode_unchanged_by_default() {
+        let mut s = Sim::default();
+        assert_eq!(s.down("Fn", 0).actions, start(Mode::Dictation, false));
+        assert_eq!(s.phase, RecordingPtt);
     }
 
     #[test]

@@ -52,6 +52,7 @@ fn provider_label(p: LlmProvider) -> &'static str {
         LlmProvider::Gemini => "Gemini",
         LlmProvider::Anthropic => "Anthropic",
         LlmProvider::Openai => "OpenAI 兼容服务",
+        LlmProvider::Cloudflare => "Cloudflare",
     }
 }
 
@@ -119,7 +120,7 @@ fn param_key(p: LlmProvider, model: &str, param: &str) -> String {
 /// Run the rewrite for the active provider in `cfg` (honours cfg.timeout_secs).
 pub async fn rewrite(cfg: &LlmConfig, req: &RewriteRequest) -> anyhow::Result<RewriteOutcome> {
     let secs = cfg.timeout_secs.clamp(1, 120) as u64 + (req.duration_secs / 60.0 * 6.0).ceil() as u64;
-    match tokio::time::timeout(Duration::from_secs(secs), rewrite_with(cfg.provider, cfg.active_endpoint(), req, secs, Effort::parse(&cfg.reasoning_effort))).await {
+    match tokio::time::timeout(Duration::from_secs(secs), rewrite_with(cfg.provider, &cfg.active_endpoint(), req, secs, Effort::parse(&cfg.reasoning_effort))).await {
         Ok(r) => r,
         Err(_) => Err(anyhow!("改写超时（{secs} 秒）")),
     }
@@ -341,11 +342,14 @@ pub(crate) async fn complete(
     if ep.model.trim().is_empty() {
         return Err(anyhow!("未配置{}的模型名称", provider_label(provider)));
     }
+    if provider == LlmProvider::Cloudflare && ep.base_url.is_empty() {
+        return Err(anyhow!("请填写正确的 Cloudflare 账户 ID"));
+    }
     let timeout = Duration::from_secs(timeout_secs.max(1));
     let r = match provider {
         LlmProvider::Gemini => gemini_complete(ep, system, user, json_mode, timeout, effort).await,
         LlmProvider::Anthropic => anthropic_complete(ep, system, user, timeout, effort).await,
-        LlmProvider::Openai => openai_complete(ep, system, user, timeout, effort).await,
+        LlmProvider::Openai | LlmProvider::Cloudflare => openai_complete(provider, ep, system, user, timeout, effort).await,
     };
     r.map_err(anyhow::Error::new)
 }
@@ -369,7 +373,8 @@ async fn post_json(
     }
     let v: Value = serde_json::from_str(&text).map_err(|_| Failure { message: format!("{label} 返回了无法解析的响应"), retryable: false, status: None })?;
     let model = body.get("model").and_then(Value::as_str).unwrap_or_else(|| url.split("/models/").nth(1).unwrap_or("").split(':').next().unwrap_or(""));
-    crate::usage::record(label, model, &v, 0.0);
+    // Speech recognition records plain "Cloudflare"; keep the rewrite model apart from it.
+    crate::usage::record(if label == "Cloudflare" { "Cloudflare Workers AI" } else { label }, model, &v, 0.0);
     Ok(v)
 }
 
@@ -585,12 +590,13 @@ fn openai_base(ep: &LlmEndpointConfig) -> String {
     if base.is_empty() { OPENAI_DEFAULT_BASE.to_string() } else { base.to_string() }
 }
 
-async fn openai_complete(ep: &LlmEndpointConfig, system: &str, user: &str, timeout: Duration, effort: Effort) -> Result<String, Failure> {
+/// Also serves Cloudflare Workers AI, whose chat endpoint is OpenAI-compatible.
+async fn openai_complete(provider: LlmProvider, ep: &LlmEndpointConfig, system: &str, user: &str, timeout: Duration, effort: Effort) -> Result<String, Failure> {
     let model = ep.model.trim().to_string();
     let url = format!("{}/chat/completions", openai_base(ep));
     let headers = [("Authorization", format!("Bearer {}", ep.api_key.trim()))];
-    let temp_key = param_key(LlmProvider::Openai, &model, "temperature");
-    let reasoning_key = param_key(LlmProvider::Openai, &model, "reasoning_effort");
+    let temp_key = param_key(provider, &model, "temperature");
+    let reasoning_key = param_key(provider, &model, "reasoning_effort");
     let mut with_temp = !REJECTED_PARAMS.lock().contains(&temp_key);
     let mut with_reasoning = effort != Effort::Off && !REJECTED_PARAMS.lock().contains(&reasoning_key);
     for _ in 0..3 {
@@ -607,7 +613,7 @@ async fn openai_complete(ep: &LlmEndpointConfig, system: &str, user: &str, timeo
         if with_reasoning {
             body["reasoning_effort"] = json!(effort.level());
         }
-        match post_json("OpenAI 兼容服务", &url, &headers, &body, timeout).await {
+        match post_json(provider_label(provider), &url, &headers, &body, timeout).await {
             Ok(v) => return extract_openai(&v),
             Err(f) if with_temp && mentions(&f, "temperature") => {
                 REJECTED_PARAMS.lock().insert(temp_key.clone());
@@ -620,7 +626,7 @@ async fn openai_complete(ep: &LlmEndpointConfig, system: &str, user: &str, timeo
             Err(f) => return Err(f),
         }
     }
-    Err(Failure { message: "OpenAI 兼容服务请求失败".into(), retryable: false, status: None })
+    Err(Failure { message: format!("{}请求失败", provider_label(provider)), retryable: false, status: None })
 }
 
 fn extract_openai(v: &Value) -> Result<String, Failure> {
@@ -691,6 +697,7 @@ pub async fn list_models(provider: LlmProvider, cfg: &LlmEndpointConfig) -> anyh
             let v = get_json("Anthropic", &url, &headers).await?;
             collect_ids(&v, &mut models);
         }
+        LlmProvider::Cloudflare => return Err(anyhow!("Cloudflare 不支持自动获取模型列表，请从列表中选择")),
         LlmProvider::Openai => {
             let headers = [("Authorization", format!("Bearer {key}"))];
             let url = format!("{}/models", openai_base(cfg));
@@ -987,6 +994,58 @@ mod tests {
         let reqs = seen.lock().unwrap();
         assert!(reqs[0].contains("thinkingLevel"));
         assert!(!reqs[1].contains("thinkingConfig") && !reqs[2].contains("thinkingConfig"));
+    }
+
+    #[tokio::test]
+    async fn cloudflare_request_shape_and_auth_error() {
+        use crate::providers::http::testserver::serve;
+        use crate::types::CloudflareLlmConfig;
+        let (base, seen) = serve(vec![
+            (200, r#"{"choices":[{"message":{"content":"Hello"}}]}"#),
+            (401, r#"{"success":false,"errors":[{"code":10000,"message":"Authentication error"}]}"#),
+        ])
+        .await;
+        let cf = CloudflareLlmConfig { account_id: "abc123".into(), api_key: "cf-token".into(), model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast".into() };
+        let ep = cf.endpoint(&format!("{base}/client/v4"));
+        let out = rewrite_with(LlmProvider::Cloudflare, &ep, &req(Mode::Translation, "你好"), 10, Effort::Off).await.unwrap();
+        assert_eq!(out, RewriteOutcome::Insert("Hello".into()));
+        {
+            let reqs = seen.lock().unwrap();
+            assert!(reqs[0].starts_with("POST /client/v4/accounts/abc123/ai/v1/chat/completions"), "{}", reqs[0]);
+            assert!(reqs[0].to_lowercase().contains("authorization: bearer cf-token"));
+            assert!(reqs[0].contains("@cf/meta/llama-3.3-70b-instruct-fp8-fast"));
+        }
+        let err = rewrite_with(LlmProvider::Cloudflare, &ep, &req(Mode::Translation, "你好"), 10, Effort::Off).await.unwrap_err().to_string();
+        assert!(err.starts_with("Cloudflare API Key 无效"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn cloudflare_requires_a_valid_account_id() {
+        use crate::types::CloudflareLlmConfig;
+        for id in ["", "ab/../cd"] {
+            let cf = CloudflareLlmConfig { account_id: id.into(), api_key: "k".into(), model: "m".into() };
+            let ep = cf.endpoint(crate::types::CLOUDFLARE_API_BASE);
+            assert!(ep.base_url.is_empty());
+            let err = rewrite_with(LlmProvider::Cloudflare, &ep, &req(Mode::Dictation, "你好"), 10, Effort::Off).await.unwrap_err().to_string();
+            assert!(err.contains("Cloudflare 账户 ID"), "{err}");
+        }
+    }
+
+    #[test]
+    fn cloudflare_credentials_fall_back_to_asr() {
+        let mut s = crate::types::Settings::default();
+        s.llm.provider = LlmProvider::Cloudflare;
+        assert!(!s.llm.resolved(&s.asr).ready());
+        s.asr.cloudflare.account_id = "asracct".into();
+        s.asr.cloudflare.api_key = "asr-token".into();
+        let ep = s.llm.resolved(&s.asr).active_endpoint();
+        assert_eq!(ep.api_key, "asr-token");
+        assert_eq!(ep.base_url, "https://api.cloudflare.com/client/v4/accounts/asracct/ai/v1");
+        assert!(s.llm.resolved(&s.asr).ready());
+        // The unresolved config is untouched, and the LLM's own values win.
+        assert!(!s.llm.ready());
+        s.llm.cloudflare.api_key = "own-token".into();
+        assert_eq!(s.llm.resolved(&s.asr).active_endpoint().api_key, "own-token");
     }
 
     #[tokio::test]

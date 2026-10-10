@@ -18,6 +18,7 @@ export async function mockListen<T>(event: string, handler: (payload: T) => void
 
 export const defaultSettings: Settings = {
   shortcuts: {
+    trigger: "hold",
     dictation: ["Fn"],
     askAnything: ["Fn+Space"],
     translation: ["Fn+LeftShift"],
@@ -45,6 +46,7 @@ export const defaultSettings: Settings = {
     gemini: { apiKey: "", baseUrl: "", model: "gemini-flash-latest" },
     anthropic: { apiKey: "", baseUrl: "", model: "claude-haiku-5-5" },
     openai: { apiKey: "", baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
+    cloudflare: { accountId: "", apiKey: "", model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" },
     timeoutSecs: 12,
     reasoningEffort: "off",
     personalization: { followRewrite: true, provider: "gemini", model: "", reasoningEffort: "medium" },

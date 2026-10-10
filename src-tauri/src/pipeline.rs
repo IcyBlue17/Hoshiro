@@ -274,8 +274,8 @@ async fn rewrite_stage(
     selected: Option<String>,
     duration_secs: f64,
 ) -> Result<Stage, String> {
-    let ep = settings.llm.active_endpoint();
-    let have_llm = settings.llm.enabled && !ep.api_key.trim().is_empty();
+    let llm_cfg = settings.llm.resolved(&settings.asr);
+    let have_llm = llm_cfg.enabled && llm_cfg.ready();
     if !have_llm {
         if mode == Mode::Ask {
             return Err("问任何问题需要先在设置中启用并配置改写模型".into());
@@ -305,7 +305,7 @@ async fn rewrite_stage(
         duration_secs,
     };
     let limit = Duration::from_secs(settings.llm.timeout_secs as u64 + (duration_secs / 60.0 * 6.0).ceil() as u64 + 8);
-    let result = match tokio::time::timeout(limit, providers::rewrite(&settings.llm, &req)).await {
+    let result = match tokio::time::timeout(limit, providers::rewrite(&llm_cfg, &req)).await {
         Ok(r) => r,
         Err(_) => Err(anyhow::anyhow!("改写超时")),
     };
@@ -355,6 +355,7 @@ fn llm_label(s: &Settings) -> String {
         LlmProvider::Gemini => "Gemini",
         LlmProvider::Anthropic => "Anthropic",
         LlmProvider::Openai => "OpenAI 兼容服务",
+        LlmProvider::Cloudflare => "Cloudflare Workers AI",
     };
     format!("{name} · {}", s.llm.active_endpoint().model)
 }
@@ -471,7 +472,7 @@ pub async fn run(app: AppHandle, input: ProcessInput) -> Report {
     if deliver {
         // Live sessions only: a history retry would otherwise overwrite the original timings.
         row.asr_ms = Some(asr_ms.min(u32::MAX as u128) as u32);
-        let used_llm = settings.llm.enabled && !settings.llm.active_endpoint().api_key.trim().is_empty();
+        let used_llm = settings.llm.enabled && settings.llm.resolved(&settings.asr).ready();
         row.llm_ms = used_llm.then(|| llm_ms.min(u32::MAX as u128) as u32);
         row.total_ms = Some(t0.elapsed().as_millis().min(u32::MAX as u128) as u32);
         row.asr_provider = Some(asr_label(&settings));

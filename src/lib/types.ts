@@ -9,7 +9,7 @@ export type Appearance = "system" | "light" | "dark";
 /** How long history is kept on this device (mirrors Typeless options). */
 export type HistoryRetention = "never" | "24h" | "1w" | "1m" | "1y" | "forever";
 
-export type LlmProvider = "gemini" | "anthropic" | "openai";
+export type LlmProvider = "gemini" | "anthropic" | "openai" | "cloudflare";
 
 /**
  * A shortcut is a "+"-joined list of key names, e.g. "Fn", "RightOption", "Fn+LeftShift", "Ctrl+Cmd+V".
@@ -19,7 +19,12 @@ export type LlmProvider = "gemini" | "anthropic" | "openai";
  */
 export type Shortcut = string;
 
+/** hold: hold to talk, release to finish. toggle: press once to start, press again to finish. */
+export type TriggerMode = "hold" | "toggle";
+
 export interface ShortcutBindings {
+  /** How the dictation key starts/stops a recording. Default "hold". */
+  trigger: TriggerMode;
   /** Hold to talk, double-press for hands-free. Multiple bindings allowed (Typeless default: ["Fn"]). */
   dictation: Shortcut[];
   /** Press to start/stop "Ask anything" (voice command / question). Default ["Fn+Space"]. */
@@ -32,7 +37,7 @@ export interface ShortcutBindings {
 
 export interface MimoAsrConfig {
   apiKey: string;
-  /** "https://api.xiaomimimo.com/v1" (global, default) or "https://token-plan-cn.xiaomimimo.com/v1" (China token plan) or custom */
+  /** "https://api.xiaomimimo.com/v1" (pay-as-you-go, default) or "https://token-plan-cn.xiaomimimo.com/v1" (Token Plan subscription) or custom */
   baseUrl: string;
   model: string; // "mimo-v2.5-asr"
 }
@@ -59,6 +64,8 @@ export interface LlmConfig {
   gemini: LlmEndpointConfig; // default model "gemini-flash-latest"
   anthropic: LlmEndpointConfig; // default model "claude-haiku-5-5"
   openai: LlmEndpointConfig; // OpenAI-compatible; baseUrl e.g. "https://api.openai.com/v1"
+  /** Workers AI text generation. Empty accountId/apiKey fall back to the Cloudflare speech-recognition ones. */
+  cloudflare: { accountId: string; apiKey: string; model: string }; // default model "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
   /** Request timeout in seconds before falling back to the raw transcript. */
   timeoutSecs: number;
   /** Thinking effort for interactive rewrites. "off" is fastest and recommended. */

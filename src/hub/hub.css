@@ -246,7 +246,9 @@ h1, h2, h3, p { margin: 0; }
 .page-title-right { flex: none; }
 
 /* ───────────── Home ───────────── */
-.home { padding: 0 24px 40px 24px; }
+.home { padding: 0 24px; display: flex; flex-direction: column; }
+/* Fixed-height footer; the sticky right column subtracts it so the default window needs no scrolling. */
+.home-footer { flex: none; margin-top: auto; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--text-3); }
 .hero-glow {
   position: absolute; left: 0; right: 0; top: 0; height: 280px; pointer-events: none;
   background: radial-gradient(70% 90% at 28% 0%, var(--bg-vignette) 0%, transparent 78%);
@@ -278,7 +280,7 @@ h1, h2, h3, p { margin: 0; }
 .stat-value { font-size: 31px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; }
 .stat-unit { font-size: 13.5px; font-weight: 650; }
 .stat-label { margin-top: 4px; color: var(--text-2); font-size: 14.5px; }
-.activity-card { padding: 16px 18px 14px; margin-bottom: 20px; }
+.activity-card { padding: 16px 18px 14px; }
 .activity-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
 
 .heat { position: relative; }
@@ -308,7 +310,7 @@ h1, h2, h3, p { margin: 0; }
 }
 .heat-tip span { color: #b8b8b8; }
 
-.home-right { position: sticky; top: 0; align-self: start; height: calc(100vh - 16px); display: flex; flex-direction: column; padding-top: 94px; }
+.home-right { position: sticky; top: 0; align-self: start; height: calc(100vh - 16px - 26px); display: flex; flex-direction: column; padding-top: 94px; }
 .shortcut-card { padding: 16px 16px 14px; display: flex; flex-direction: column; gap: 16px; }
 .shortcut-label { font-size: 13.5px; color: var(--text-2); margin-bottom: 8px; }
 .shortcut-keys { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }

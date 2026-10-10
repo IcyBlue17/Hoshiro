@@ -65,11 +65,7 @@ pub fn sanitize(p: &mut PersonalProfile) {
 pub(crate) fn resolve_llm(cfg: &LlmConfig) -> anyhow::Result<(LlmProvider, LlmEndpointConfig, llm::Effort)> {
     let p = &cfg.personalization;
     let provider = if p.follow_rewrite { cfg.provider } else { p.provider };
-    let mut ep = match provider {
-        LlmProvider::Gemini => cfg.gemini.clone(),
-        LlmProvider::Anthropic => cfg.anthropic.clone(),
-        LlmProvider::Openai => cfg.openai.clone(),
-    };
+    let mut ep = cfg.endpoint_for(provider);
     if !p.follow_rewrite && !p.model.trim().is_empty() {
         ep.model = p.model.trim().to_string();
     }
@@ -78,6 +74,7 @@ pub(crate) fn resolve_llm(cfg: &LlmConfig) -> anyhow::Result<(LlmProvider, LlmEn
             LlmProvider::Gemini => "Gemini",
             LlmProvider::Anthropic => "Anthropic",
             LlmProvider::Openai => "OpenAI 兼容服务",
+            LlmProvider::Cloudflare => "Cloudflare Workers AI",
         };
         bail!("请先配置个性化分析所用模型（{name}）的 API Key");
     }
@@ -132,7 +129,7 @@ pub async fn run(app: &AppHandle, manual: bool) -> anyhow::Result<PersonalProfil
     if !settings.style.ai_personalization {
         bail!("请先开启 AI 个性化学习");
     }
-    let (job_provider, job_ep, job_effort) = resolve_llm(&settings.llm)?;
+    let (job_provider, job_ep, job_effort) = resolve_llm(&settings.llm.resolved(&settings.asr))?;
     let mut p = state.db.profile()?;
     if !eligible(&p, manual, Utc::now()) {
         if manual {

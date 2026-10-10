@@ -7,7 +7,7 @@ import { useBackendEvent } from "../hooks";
 import { useFeedback } from "../feedback";
 import { Segmented, Spinner, Switch } from "../ui";
 import { Group, Row } from "./shared";
-import { EFFORT_OPTIONS, ModelInput, PROVIDERS } from "./Providers";
+import { EFFORT_OPTIONS, llmEndpoint, ModelInput, PROVIDERS } from "./Providers";
 
 const shortDate = (value: string) => {
   const d = new Date(value);
@@ -98,7 +98,7 @@ export function Personalization() {
             {enabled && profile && (
               <button
                 className="btn btn-secondary btn-sm"
-                disabled={running || profile.pendingSessions < 3 || !settings.llm[settings.llm.provider].apiKey.trim()}
+                disabled={running || profile.pendingSessions < 3 || !llmEndpoint(settings, settings.llm.provider).apiKey.trim()}
                 onClick={run}
               >
                 {running ? <Spinner size={13} /> : <Sparkles size={14} />}
@@ -187,7 +187,7 @@ function AnalysisModel() {
   const p = llm.personalization;
   const follow = p.followRewrite;
   const provider = follow ? llm.provider : p.provider;
-  const cfg = llm[provider];
+  const cfg = llmEndpoint(settings, provider);
   return (
     <Group>
       <Row title="学习模型" desc={follow ? "与改写相同" : undefined}>

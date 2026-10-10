@@ -33,7 +33,7 @@
 
 | 服务商 | 必填项 | 说明 |
 |---|---|---|
-| 小米 MiMo（推荐） | API Key、服务区域（Global / 中国） | 中文识别准确率高，响应快，自带标点。模型：`mimo-v2.5-asr` |
+| 小米 MiMo（推荐） | API Key、套餐（按量付费 / Token Plan） | 中文识别准确率高，响应快，自带标点。模型：`mimo-v2.5-asr`。按量付费的 Key 以 `sk-` 开头，Token Plan 的 Key 以 `tp-` 开头，两者不能混用 |
 | Cloudflare Workers AI | Account ID、API Token | 模型推荐 `Whisper Large v3 Turbo`。响应受服务端排队影响（约 2~3 秒） |
 | Azure Speech | Speech Key、Region（如 `eastasia`） | 流式传输，边说边识别 |
 | Google Cloud Speech | 项目 ID、区域、模型；API Key 或 Service Account JSON | 流式传输，需在 GCP 启用 Speech-to-Text API |
@@ -44,7 +44,8 @@
 |---|---|---|
 | Google Gemini | API Key | 默认模型 `gemini-flash-latest` |
 | Anthropic Claude | API Key | 默认模型 `claude-haiku-5-5` |
-| OpenAI 兼容接口 | Base URL、API Key、模型名 | 适用于 OpenAI、DeepSeek、OpenRouter 及各类代理服务 |
+| Cloudflare Workers AI | Account ID、API Token、模型 | 默认模型 `Llama 3.3 70B Fast`。Account ID 与 Token 留空时，沿用语音识别中填写的 Cloudflare 设置 |
+| OpenAI 兼容接口 | 平台、API Key、模型名 | 在「平台」下拉框中选择 OpenAI、Vercel AI Gateway、OpenRouter、DeepSeek、智谱、Kimi、阿里云百炼、火山方舟、硅基流动、Groq、xAI、Mistral 或本地 Ollama，会自动填入接口地址与默认模型。选择「自定义」可手动填写任意兼容服务的 Base URL |
 
 > **思考强度**：「改写」设置中的思考强度（Thinking）默认关闭。开启后会增加额外响应延迟，建议保持关闭。
 

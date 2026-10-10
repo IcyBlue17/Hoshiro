@@ -183,9 +183,16 @@ pub fn sanitize(s: &mut Settings) {
         ep.api_key = ep.api_key.trim().to_string();
         ep.base_url = ep.base_url.trim().trim_end_matches('/').to_string();
         ep.model = ep.model.trim().to_string();
-        if ep.model.is_empty() {
+        // The default model only makes sense on the provider's own endpoint (not e.g. OpenRouter or Ollama).
+        if ep.model.is_empty() && (ep.base_url.is_empty() || ep.base_url == def.base_url.trim_end_matches('/')) {
             ep.model = def.model.clone();
         }
+    }
+    for value in [&mut s.llm.cloudflare.account_id, &mut s.llm.cloudflare.api_key, &mut s.llm.cloudflare.model] {
+        *value = value.trim().to_string();
+    }
+    if s.llm.cloudflare.model.is_empty() {
+        s.llm.cloudflare.model = d.llm.cloudflare.model.clone();
     }
     if s.llm.timeout_secs == 0 {
         s.llm.timeout_secs = d.llm.timeout_secs;
@@ -316,6 +323,18 @@ mod tests {
         assert_eq!(s.translation_targets.len(), 3);
         assert_eq!(s.asr.mimo.api_key, "key");
         assert!(s.microphone_device_id.is_none());
+    }
+
+    #[test]
+    fn empty_openai_model_is_only_defaulted_on_openai() {
+        let mut s = Settings::default();
+        s.llm.openai.model = String::new();
+        sanitize(&mut s);
+        assert_eq!(s.llm.openai.model, Settings::default().llm.openai.model);
+        s.llm.openai.base_url = "https://openrouter.ai/api/v1/".into();
+        s.llm.openai.model = " ".into();
+        sanitize(&mut s);
+        assert_eq!(s.llm.openai.model, "");
     }
 
     #[test]

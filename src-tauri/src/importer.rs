@@ -133,6 +133,7 @@ pub fn shortcuts_from_json(v: &Value) -> Option<ShortcutBindings> {
     let def = ShortcutBindings::default();
     let dictation = map_bindings(b.get("dictationMode"), "口述", &mut msgs).filter(|x| !x.is_empty());
     Some(ShortcutBindings {
+        trigger: def.trigger,
         dictation: dictation.unwrap_or(def.dictation),
         ask_anything: map_bindings(b.get("askAnythingMode"), "随便问", &mut msgs).unwrap_or(def.ask_anything),
         translation: map_bindings(b.get("translationMode"), "翻译", &mut msgs).unwrap_or(def.translation),

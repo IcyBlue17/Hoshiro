@@ -4,14 +4,14 @@ import { api } from "../../lib/ipc";
 import { EVENTS, type ShortcutBindings, type ShortcutCaptureEvent } from "../../lib/types";
 import { useBackendEvent } from "../hooks";
 import { useApp } from "../store";
-import { DEFAULT_SHORTCUTS, SHORTCUT_ERROR_TEXT, allBindings, validateShortcut } from "../format";
-import { ShortcutKeys, Tooltip } from "../ui";
+import { DEFAULT_SHORTCUTS, SHORTCUT_ERROR_TEXT, allBindings, dictationGestureText, validateShortcut } from "../format";
+import { Segmented, ShortcutKeys, Tooltip } from "../ui";
 import { Group, Row } from "./shared";
 
-type Feature = keyof ShortcutBindings;
+type Feature = Exclude<keyof ShortcutBindings, "trigger">;
 
 const FEATURES: { key: Feature; title: string; desc: string }[] = [
-  { key: "dictation", title: "语音输入", desc: "按住说话，松开结束；双击进入免提模式。" },
+  { key: "dictation", title: "语音输入", desc: "" },
   { key: "askAnything", title: "随便问", desc: "按下开始和停止随便提问。" },
   { key: "translation", title: "翻译", desc: "按下开始和停止翻译。" },
   { key: "pasteLastTranscript", title: "粘贴上一次转录", desc: "再次粘贴最近一次的转录结果。" },
@@ -104,6 +104,25 @@ export function ShortcutSettings() {
 
   return (
     <Group>
+      <Row
+        title="触发方式"
+        desc={
+          settings.shortcuts.trigger === "toggle"
+            ? "点按开关：按一下开始说话，再按一下结束，松开按键不会停止。"
+            : "长按说话：按住说话，松开结束；双击进入免提模式。"
+        }
+      >
+        <Segmented
+          id="trigger-mode"
+          size="sm"
+          value={settings.shortcuts.trigger}
+          onChange={(v) => update((d) => void (d.shortcuts.trigger = v))}
+          options={[
+            { value: "hold", label: "长按说话" },
+            { value: "toggle", label: "点按开关" },
+          ]}
+        />
+      </Row>
       {FEATURES.map((f) => {
         const list = settings.shortcuts[f.key];
         const isDefault = JSON.stringify(list) === JSON.stringify(DEFAULT_SHORTCUTS[f.key]);
@@ -131,7 +150,7 @@ export function ShortcutSettings() {
                 )}
               </span>
             }
-            desc={f.desc}
+            desc={f.key === "dictation" ? dictationGestureText(settings.shortcuts.trigger) : f.desc}
           >
             <div className="chip-line">
               {list.map((s, i) => {

@@ -52,7 +52,8 @@ impl Kind {
 /// Speech-recognition services are billed by audio duration; everything else is an LLM billed by tokens.
 pub fn classify(provider: &str) -> Kind {
     let p = provider.trim().to_ascii_lowercase();
-    if ["mimo", "cloudflare", "azure", "google"].iter().any(|n| p.starts_with(n)) {
+    // Cloudflare speech is recorded as exactly "Cloudflare"; its rewrite models as "Cloudflare Workers AI".
+    if p == "cloudflare" || ["mimo", "azure", "google"].iter().any(|n| p.starts_with(n)) {
         Kind::Asr
     } else {
         Kind::Llm
@@ -106,7 +107,7 @@ mod tests {
         for p in ["MiMo", "Cloudflare", "Azure Speech", "Google Speech"] {
             assert_eq!(classify(p), Kind::Asr, "{p}");
         }
-        for p in ["Gemini", "Anthropic", "OpenAI 兼容服务"] {
+        for p in ["Gemini", "Anthropic", "OpenAI 兼容服务", "Cloudflare Workers AI"] {
             assert_eq!(classify(p), Kind::Llm, "{p}");
         }
     }

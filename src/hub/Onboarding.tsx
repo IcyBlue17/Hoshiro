@@ -252,7 +252,7 @@ function FnStep() {
       </div>
       <h1 className="ob-title">设置 Fn 键</h1>
       <p className="ob-sub">
-        将 <b>系统设置</b> › <b>键盘</b> › “按下 🌐 键时” 设为 <b>不执行任何操作</b>，这样按住 Fn 说话时不会触发表情符号或听写。
+        将 <b>系统设置</b> › <b>键盘</b> › “按下 🌐 键时” 设为 <b>不执行任何操作</b>，这样用 Fn 说话时不会触发表情符号或听写。
       </p>
       <button className="btn btn-secondary btn-lg" onClick={() => api.openKeyboardSettings()}>
         打开键盘设置
@@ -264,14 +264,21 @@ function FnStep() {
 function TryStep() {
   const { settings } = useApp();
   const first = settings.shortcuts.dictation[0] ?? "Fn";
+  const toggle = settings.shortcuts.trigger === "toggle";
   return (
     <div className="ob-center">
       <h1 className="ob-title">试一试</h1>
       <p className="ob-sub">
-        点击下面的输入框，然后按住 <ShortcutKeys shortcut={first} size="sm" /> 说话，松开即可输入。
+        {toggle ? (
+          <>点击下面的输入框，然后按一下 <ShortcutKeys shortcut={first} size="sm" /> 开始说话，再按一下即可输入。</>
+        ) : (
+          <>点击下面的输入框，然后按住 <ShortcutKeys shortcut={first} size="sm" /> 说话，松开即可输入。</>
+        )}
       </p>
-      <textarea className="textarea ob-textarea" rows={6} placeholder="按住 fn 说话，松开即可输入" autoFocus spellCheck={false} />
-      <p className="srow-desc">轻点 {first === "Fn" ? "Fn" : "快捷键"} 后再按一次进入免提模式；按 Esc 取消。</p>
+      <textarea className="textarea ob-textarea" rows={6} placeholder={toggle ? "按一下 fn 开始说话，再按一下即可输入" : "按住 fn 说话，松开即可输入"} autoFocus spellCheck={false} />
+      <p className="srow-desc">
+        {toggle ? "录音时按 Esc 可取消。" : `轻点 ${first === "Fn" ? "Fn" : "快捷键"} 后再按一次进入免提模式；按 Esc 取消。`}
+      </p>
     </div>
   );
 }

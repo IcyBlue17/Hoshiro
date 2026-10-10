@@ -29,9 +29,23 @@ impl Mode {
     }
 }
 
+/// How the dictation hotkey starts/stops a recording.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TriggerMode {
+    /// Hold to talk, release to finish; double-press for hands-free.
+    #[default]
+    Hold,
+    /// Press once to start, press again to finish; releasing does nothing.
+    Toggle,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ShortcutBindings {
+    /// Missing in older settings files => `hold`.
+    #[serde(default)]
+    pub trigger: TriggerMode,
     pub dictation: Vec<String>,
     pub ask_anything: Vec<String>,
     pub translation: Vec<String>,
@@ -41,6 +55,7 @@ pub struct ShortcutBindings {
 impl Default for ShortcutBindings {
     fn default() -> Self {
         Self {
+            trigger: TriggerMode::default(),
             dictation: vec!["Fn".into()],
             ask_anything: vec!["Fn+Space".into()],
             translation: vec!["Fn+LeftShift".into()],
@@ -90,6 +105,7 @@ pub enum LlmProvider {
     Gemini,
     Anthropic,
     Openai,
+    Cloudflare,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -109,6 +125,8 @@ pub struct LlmConfig {
     pub gemini: LlmEndpointConfig,
     pub anthropic: LlmEndpointConfig,
     pub openai: LlmEndpointConfig,
+    /// Workers AI text generation; empty credentials fall back to the Cloudflare speech-recognition ones.
+    pub cloudflare: CloudflareLlmConfig,
     pub timeout_secs: u32,
     /// Thinking effort for interactive rewrites: "off" | "low" | "medium" | "high". "off" is fastest.
     pub reasoning_effort: String,
@@ -146,6 +164,7 @@ impl Default for LlmConfig {
                 base_url: "https://api.openai.com/v1".into(),
                 model: "gpt-4.1-mini".into(),
             },
+            cloudflare: CloudflareLlmConfig::default(),
             timeout_secs: 12,
             reasoning_effort: "off".into(),
             personalization: PersonalizationLlm::default(),
@@ -153,13 +172,53 @@ impl Default for LlmConfig {
     }
 }
 
-impl LlmConfig {
-    pub fn active_endpoint(&self) -> &LlmEndpointConfig {
-        match self.provider {
-            LlmProvider::Gemini => &self.gemini,
-            LlmProvider::Anthropic => &self.anthropic,
-            LlmProvider::Openai => &self.openai,
+/// Cloudflare REST API root; Workers AI's OpenAI-compatible API lives under `/accounts/{id}/ai/v1`.
+pub const CLOUDFLARE_API_BASE: &str = "https://api.cloudflare.com/client/v4";
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CloudflareLlmConfig { pub account_id: String, pub api_key: String, pub model: String }
+impl Default for CloudflareLlmConfig {
+    fn default() -> Self { Self { account_id: String::new(), api_key: String::new(), model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast".into() } }
+}
+impl CloudflareLlmConfig {
+    /// Empty account id / token borrow the speech-recognition ones.
+    pub fn resolved(&self, asr: &CloudflareAsrConfig) -> Self {
+        let pick = |own: &str, shared: &str| if own.trim().is_empty() { shared.trim().to_string() } else { own.trim().to_string() };
+        Self { account_id: pick(&self.account_id, &asr.account_id), api_key: pick(&self.api_key, &asr.api_key), model: self.model.clone() }
+    }
+    /// OpenAI-compatible endpoint for this account; `base_url` is empty when the account id is missing or malformed.
+    pub fn endpoint(&self, api_base: &str) -> LlmEndpointConfig {
+        let id = self.account_id.trim();
+        let valid = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric());
+        LlmEndpointConfig {
+            api_key: self.api_key.clone(),
+            base_url: if valid { format!("{}/accounts/{id}/ai/v1", api_base.trim_end_matches('/')) } else { String::new() },
+            model: self.model.clone(),
         }
+    }
+}
+
+impl LlmConfig {
+    pub fn active_endpoint(&self) -> LlmEndpointConfig { self.endpoint_for(self.provider) }
+    pub fn endpoint_for(&self, provider: LlmProvider) -> LlmEndpointConfig {
+        match provider {
+            LlmProvider::Gemini => self.gemini.clone(),
+            LlmProvider::Anthropic => self.anthropic.clone(),
+            LlmProvider::Openai => self.openai.clone(),
+            LlmProvider::Cloudflare => self.cloudflare.endpoint(CLOUDFLARE_API_BASE),
+        }
+    }
+    /// Copy with the Cloudflare credentials resolved against the speech-recognition ones; use this at request time.
+    pub fn resolved(&self, asr: &AsrConfig) -> LlmConfig {
+        let mut c = self.clone();
+        c.cloudflare = self.cloudflare.resolved(&asr.cloudflare);
+        c
+    }
+    /// The active provider has everything it needs to be called.
+    pub fn ready(&self) -> bool {
+        let ep = self.active_endpoint();
+        !ep.api_key.trim().is_empty() && (self.provider != LlmProvider::Cloudflare || !ep.base_url.is_empty())
     }
 }
 

@@ -49,6 +49,7 @@ fn visit(s: &mut Settings, mut f: impl FnMut(&'static str, &mut String)) {
     f("llm.gemini.api_key", &mut s.llm.gemini.api_key);
     f("llm.anthropic.api_key", &mut s.llm.anthropic.api_key);
     f("llm.openai.api_key", &mut s.llm.openai.api_key);
+    f("llm.cloudflare.api_key", &mut s.llm.cloudflare.api_key);
 }
 
 /// Collect the non-empty secrets of `s`.

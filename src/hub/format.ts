@@ -1,6 +1,7 @@
-import type { HistoryRetention, Shortcut, ShortcutBindings } from "../lib/types";
+import type { HistoryRetention, Shortcut, ShortcutBindings, TriggerMode } from "../lib/types";
 
 export const DEFAULT_SHORTCUTS: ShortcutBindings = {
+  trigger: "hold",
   dictation: ["Fn"],
   askAnything: ["Fn+Space"],
   translation: ["Fn+LeftShift"],
@@ -77,6 +78,11 @@ export function validateShortcut(combo: Shortcut, others: Shortcut[]): ShortcutE
   if (RESERVED.includes(norm)) return "systemReserved";
   if (others.some((o) => normalizedCombo(o) === norm || o === combo)) return "alreadyInUse";
   return null;
+}
+
+/** One-line description of how the dictation key works in the given trigger mode. */
+export function dictationGestureText(trigger: TriggerMode): string {
+  return trigger === "toggle" ? "按一下开始说话，再按一下结束。" : "按住说话，松开结束；双击进入免提模式。";
 }
 
 export function allBindings(b: ShortcutBindings): Shortcut[] {

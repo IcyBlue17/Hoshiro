@@ -806,8 +806,13 @@ impl Controller {
         }
         log::info!("[{}] discarded (hint={hint})", short_id(&sess.id));
         if hint {
-            let label = notify::first_binding_label(&self.state().settings());
-            alert("hint", format!("按住 [[{label}]] 说话，双击 [[{label}]] 进入免提模式"), "info")
+            let settings = self.state().settings();
+            let label = notify::first_binding_label(&settings);
+            let text = match settings.shortcuts.trigger {
+                crate::types::TriggerMode::Toggle => format!("按一下 [[{label}]] 开始说话，再按一下结束"),
+                _ => format!("按住 [[{label}]] 说话，双击 [[{label}]] 进入免提模式"),
+            };
+            alert("hint", text, "info")
                 .duration(Some(3500))
                 .show(&self.app);
         }
