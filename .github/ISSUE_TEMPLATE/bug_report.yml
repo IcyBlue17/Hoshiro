@@ -1,0 +1,43 @@
+name: 问题反馈
+description: 哪里不对劲
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 你做了什么，期望看到什么，实际看到什么。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 在 … 里按住 Fn
+        2. 说 …
+        3. …
+  - type: input
+    id: version
+    attributes:
+      label: Hoshiro 版本
+      description: 「设置 › 关于」里可以看到
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS 版本
+    validations:
+      required: true
+  - type: input
+    id: providers
+    attributes:
+      label: 语音识别 / 改写服务商
+      placeholder: MiMo / Gemini
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志（可选）
+      description: 在 ~/Library/Application Support/cn.icybit.hoshiro/logs/ 里。贴之前检查有没有不想公开的内容。
+      render: text

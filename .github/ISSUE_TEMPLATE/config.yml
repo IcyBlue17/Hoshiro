@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用说明
+    url: https://github.com/IcyBlue17/hoshiro/blob/main/docs/guide.md
+    about: 常见问题和各服务商的配置方法

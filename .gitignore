@@ -1,0 +1,44 @@
+# ── 依赖 ──
+node_modules/
+
+# ── 构建产物 ──
+dist/
+src-tauri/target/
+src-tauri/gen/
+artifacts/
+.release-out/
+*.tsbuildinfo
+*.dmg
+*.app.tar.gz
+*.app.tar.gz.sig
+latest.json
+
+# ── 密钥与凭据（永远不要提交） ──
+.env
+.env.*
+*.key
+*.key.pub
+*.pem
+*.p12
+*.mobileprovision
+
+# ── 本地资料与参考（不是源码） ──
+design-ref/
+SPEC.md
+docs/NEXT.md
+docs/IMPLEMENTATION.md
+src-tauri/examples/
+scratch/
+*.jsonl
+
+# ── 系统与编辑器 ──
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*~
+.idea/
+.vscode/
+.zed/
+.claude/
+.fleet/

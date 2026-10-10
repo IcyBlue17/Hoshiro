@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Hoshiro 需要使用麦克风来进行语音输入。</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Hoshiro 需要控制其他应用以插入文字。</string>
+  <key>LSUIElement</key>
+  <false/>
+</dict>
+</plist>

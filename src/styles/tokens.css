@@ -1,0 +1,119 @@
+/* Design tokens; bar styles live in src/bar. */
+:root { color-scheme: light dark; }
+html, body, #root { margin: 0; padding: 0; height: 100%; }
+html.window-bar, html.window-bar body { background: transparent !important; overflow: hidden; }
+* { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; }
+
+/* ───────── Dark (default) — approximates Typeless dark mode ───────── */
+:root,
+:root[data-theme="dark"] {
+  --bg-page: #1e1e1e;
+  --bg-vignette: #121212;
+  --bg-sidebar: #2a2a2a;
+  --bg-card: #323232;
+  --bg-card-2: #2b2b2b;
+  --bg-hover: #3a3a3a;
+  --bg-selected: #3a3a3a;
+  --bg-input: #262626;
+  --bg-overlay: rgba(0, 0, 0, 0.55);
+  --bg-modal: #2a2a2a;
+  --bg-popover: #303030;
+  --text: #f2f2f2;
+  --text-2: #9a9a9a;
+  --text-3: #6f6f6f;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --divider: rgba(255, 255, 255, 0.07);
+  --accent: #5b7cfa;
+  --accent-hover: #6f8dff;
+  --accent-soft: rgba(91, 124, 250, 0.18);
+  --accent-text: #ffffff;
+  --danger: #ff5d5d;
+  --danger-soft: rgba(255, 93, 93, 0.14);
+  --success: #3ccf8e;
+  --success-soft: rgba(60, 207, 142, 0.14);
+  --warning: #f5b84a;
+  --warning-soft: rgba(245, 184, 74, 0.14);
+  --keycap-bg: #3b3b3b;
+  --keycap-border: rgba(255, 255, 255, 0.14);
+  --keycap-text: #f2f2f2;
+  --heat-0: #3d3d3d;
+  --heat-1: #2c3a6b;
+  --heat-2: #3b4fa8;
+  --heat-3: #4f6ae0;
+  --heat-4: #7b96ff;
+  --heat-hatch: rgba(255, 255, 255, 0.1);
+  --dot-grid: rgba(255, 255, 255, 0.075);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --scrollbar: rgba(255, 255, 255, 0.18);
+  --radius-card: 20px;
+  --radius-btn: 12px;
+  color: var(--text);
+}
+
+/* ───────── Light ───────── */
+:root[data-theme="light"] {
+  --bg-page: #f3f3f4;
+  --bg-vignette: #ebebee;
+  --bg-sidebar: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-2: #f7f7f8;
+  --bg-hover: #f0f0f2;
+  --bg-selected: #ececef;
+  --bg-input: #f4f4f6;
+  --bg-overlay: rgba(20, 20, 24, 0.32);
+  --bg-modal: #ffffff;
+  --bg-popover: #ffffff;
+  --text: #151515;
+  --text-2: #6b6b6b;
+  --text-3: #9b9b9b;
+  --border: rgba(0, 0, 0, 0.06);
+  --border-strong: rgba(0, 0, 0, 0.12);
+  --divider: rgba(0, 0, 0, 0.07);
+  --accent: #4a68f0;
+  --accent-hover: #3e5ae0;
+  --accent-soft: rgba(74, 104, 240, 0.12);
+  --accent-text: #ffffff;
+  --danger: #e5484d;
+  --danger-soft: rgba(229, 72, 77, 0.1);
+  --success: #1f9d6b;
+  --success-soft: rgba(31, 157, 107, 0.1);
+  --warning: #c98a12;
+  --warning-soft: rgba(201, 138, 18, 0.12);
+  --keycap-bg: #f4f4f6;
+  --keycap-border: rgba(0, 0, 0, 0.14);
+  --keycap-text: #151515;
+  --heat-0: #ececef;
+  --heat-1: #cdd7fb;
+  --heat-2: #9fb2f8;
+  --heat-3: #6f8af0;
+  --heat-4: #4a66e0;
+  --heat-hatch: rgba(0, 0, 0, 0.09);
+  --dot-grid: rgba(0, 0, 0, 0.07);
+  --shadow-modal: 0 24px 64px rgba(20, 20, 40, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --shadow-popover: 0 12px 32px rgba(20, 20, 40, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.07);
+  --scrollbar: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+}
+
+html.window-main, html.window-main body {
+  background: var(--bg-page);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+html.window-main input, html.window-main textarea { user-select: text; -webkit-user-select: text; }
+html.window-main ::selection { background: var(--accent-soft); }
+
+html.window-main ::-webkit-scrollbar { width: 10px; height: 10px; }
+html.window-main ::-webkit-scrollbar-track { background: transparent; }
+html.window-main ::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+html.window-main ::-webkit-scrollbar-thumb:hover { background-color: var(--text-3); background-clip: content-box; }
