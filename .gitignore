@@ -43,3 +43,7 @@ Thumbs.db
 .zed/
 .claude/
 .fleet/
+
+# ── 官网 (frontend/) ──
+frontend/.vitepress/cache/
+frontend/public/app/

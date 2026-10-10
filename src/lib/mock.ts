@@ -55,9 +55,26 @@ export const defaultSettings: Settings = {
 
 let settings: Settings = structuredClone(defaultSettings);
 // `?shot`: placeholder keys so screenshots show a configured app.
-if (typeof location !== "undefined" && new URLSearchParams(location.search).has("shot")) {
+const shot = typeof location !== "undefined" && new URLSearchParams(location.search).has("shot");
+if (shot) {
   settings.asr.mimo.apiKey = "demo";
   settings.llm.gemini.apiKey = "demo";
+}
+
+// An embedding page (the website) drives the theme: `?appearance=light|dark`, then postMessage({ appearance }).
+if (typeof window !== "undefined") {
+  const pick = (v: unknown) => (v === "light" || v === "dark" ? v : null);
+  const initial = pick(new URLSearchParams(location.search).get("appearance"));
+  if (initial) {
+    settings.appearance = initial;
+    document.documentElement.setAttribute("data-theme", initial); // avoid a flash before settings load
+  }
+  window.addEventListener("message", (e) => {
+    const next = e.origin === location.origin ? pick(e.data?.appearance) : null;
+    if (!next) return;
+    settings.appearance = next;
+    mockEmit("app://settings-updated", structuredClone(settings));
+  });
 }
 
 const now = Date.now();
@@ -141,7 +158,7 @@ function mockStats(): Stats {
   };
 }
 
-let typelessRunning = !(typeof location !== "undefined" && new URLSearchParams(location.search).has("shot"));
+let typelessRunning = !shot;
 let captureCleanup: (() => void) | null = null;
 function stopCapture() { captureCleanup?.(); captureCleanup = null; }
 let profile: PersonalProfile = {
@@ -164,7 +181,8 @@ let profile: PersonalProfile = {
 };
 
 let mockUpdate: any = null;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// `?shot` (screenshots / website demo): cap the fake latency so the UI feels instant.
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, shot ? Math.min(ms, 40) : ms));
 
 export async function mockInvoke<T>(cmd: string, args: any = {}): Promise<T> {
   await sleep(30);
@@ -193,7 +211,7 @@ export async function mockInvoke<T>(cmd: string, args: any = {}): Promise<T> {
     case "save_settings": settings = structuredClone(args.settings); mockEmit("app://settings-updated", settings); return r(settings);
     case "complete_onboarding": settings.onboardingCompleted = true; return r(undefined);
     case "get_permissions":
-    case "request_permission": return r({ microphone: "granted", accessibility: "granted", inputMonitoring: "notDetermined" });
+    case "request_permission": return r({ microphone: "granted", accessibility: "granted", inputMonitoring: shot ? "granted" : "notDetermined" });
     case "list_microphones": return r([
       { id: "builtin", name: "MacBook Pro麦克风", isDefault: true, kind: "builtin" },
       { id: "airpods", name: "AirPods", isDefault: false, kind: "bluetooth" },
