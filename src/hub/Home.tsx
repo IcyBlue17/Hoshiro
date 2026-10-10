@@ -170,7 +170,6 @@ export function Home() {
           </div>
         </aside>
       </div>
-      <footer className="home-footer">Made with ❤️ by IcyMichiko</footer>
     </div>
   );
 }

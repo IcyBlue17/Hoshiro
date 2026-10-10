@@ -246,9 +246,7 @@ h1, h2, h3, p { margin: 0; }
 .page-title-right { flex: none; }
 
 /* ───────────── Home ───────────── */
-.home { padding: 0 24px; display: flex; flex-direction: column; }
-/* Fixed-height footer; the sticky right column subtracts it so the default window needs no scrolling. */
-.home-footer { flex: none; margin-top: auto; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--text-3); }
+.home { padding: 0 24px; }
 .hero-glow {
   position: absolute; left: 0; right: 0; top: 0; height: 280px; pointer-events: none;
   background: radial-gradient(70% 90% at 28% 0%, var(--bg-vignette) 0%, transparent 78%);
@@ -310,7 +308,7 @@ h1, h2, h3, p { margin: 0; }
 }
 .heat-tip span { color: #b8b8b8; }
 
-.home-right { position: sticky; top: 0; align-self: start; height: calc(100vh - 16px - 26px); display: flex; flex-direction: column; padding-top: 94px; }
+.home-right { position: sticky; top: 0; align-self: start; height: calc(100vh - 16px); display: flex; flex-direction: column; padding-top: 94px; }
 .shortcut-card { padding: 16px 16px 14px; display: flex; flex-direction: column; gap: 16px; }
 .shortcut-label { font-size: 13.5px; color: var(--text-2); margin-bottom: 8px; }
 .shortcut-keys { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -651,6 +649,7 @@ h1, h2, h3, p { margin: 0; }
 .about-link-text { flex: 1; min-width: 0; display: flex; flex-direction: column; color: var(--text); }
 .about-link-value { font-size: 13.5px; color: var(--text-2); }
 .about-footer { text-align: center; color: var(--text-3); font-size: 13px; margin: 26px 0 4px; }
+.about-credit { margin-top: 2px; }
 .license-text { margin: 0 0 10px; font-size: 13px; line-height: 1.7; color: var(--text-2); max-height: 380px; overflow: auto; user-select: text; }
 .license-text p { margin: 0 0 12px; }
 .license-text p:first-child { color: var(--text); font-weight: 700; }

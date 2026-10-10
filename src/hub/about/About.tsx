@@ -73,6 +73,7 @@ export function AboutSection() {
         <Row title="隐私" desc="历史记录、词典和 API Key 仅保存在此设备上；音频与文字只会发送给您自行配置的语音识别与改写服务商；检查更新时只会访问 GitHub。" />
       </Group>
       <p className="about-footer">Hoshiro 的诞生离不开这些开源项目 ❤︎</p>
+      <p className="about-footer about-credit">Made with ❤️ by IcyMichiko</p>
 
       <Modal open={lic} onClose={() => setLic(false)} width={560}>
         <ModalHeader title="开源许可" subtitle="MIT License" onClose={() => setLic(false)} />
