@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import {
   AlertTriangle,
   ArrowLeftRight,
@@ -42,36 +42,63 @@ const CATEGORIES: { key: SettingsCategory; label: string; icon: typeof Mic }[] =
   { key: "about", label: "关于", icon: Info },
 ];
 
+const LAST_CATEGORY_KEY = "hoshiro.settings.category";
+
+function loadLastCategory(): SettingsCategory {
+  try {
+    const v = localStorage.getItem(LAST_CATEGORY_KEY);
+    if (CATEGORIES.some((c) => c.key === v)) return v as SettingsCategory;
+  } catch {}
+  return "general";
+}
+
 export function SettingsModal({
   open,
   initialCategory,
   onClose,
 }: {
   open: boolean;
-  initialCategory: SettingsCategory;
+  /** Jump to this category; when omitted the modal reopens where the user left it. */
+  initialCategory?: SettingsCategory;
   onClose: () => void;
 }) {
-  const [cat, setCat] = useState<SettingsCategory>(initialCategory);
+  const [cat, setCat] = useState<SettingsCategory>(() => initialCategory ?? loadLastCategory());
+  // Resolve the category while rendering the opening frame (not in an effect), so the modal never
+  // paints the previous page first. A fresh LayoutGroup per opening keeps the nav pill from
+  // animating in from where it was last time; it only slides on clicks inside the modal.
+  const [wasOpen, setWasOpen] = useState(open);
+  const [session, setSession] = useState(0);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setSession((n) => n + 1);
+      if (initialCategory) setCat(initialCategory);
+    }
+  }
   useEffect(() => {
-    if (open) setCat(initialCategory);
-  }, [open, initialCategory]);
+    try {
+      localStorage.setItem(LAST_CATEGORY_KEY, cat);
+    } catch {}
+  }, [cat]);
   const current = CATEGORIES.find((c) => c.key === cat)!;
 
   return (
     <Modal open={open} onClose={onClose} width={860} className="settings-modal">
       <div className="settings-layout">
-        <div className="settings-nav">
-          <h2 className="settings-heading">设置</h2>
-          {CATEGORIES.map(({ key, label, icon: Icon }) => (
-            <button key={key} className={`snav-item ${cat === key ? "active" : ""}`} onClick={() => setCat(key)}>
-              {cat === key && (
-                <motion.span layoutId="snav-pill" className="snav-pill" transition={{ type: "spring", stiffness: 520, damping: 40 }} />
-              )}
-              <Icon size={17} strokeWidth={1.9} />
-              <span>{label}</span>
-            </button>
-          ))}
-        </div>
+        <LayoutGroup id={`settings-nav-${session}`}>
+          <div className="settings-nav">
+            <h2 className="settings-heading">设置</h2>
+            {CATEGORIES.map(({ key, label, icon: Icon }) => (
+              <button key={key} className={`snav-item ${cat === key ? "active" : ""}`} onClick={() => setCat(key)}>
+                {cat === key && (
+                  <motion.span layoutId="snav-pill" className="snav-pill" transition={{ type: "spring", stiffness: 520, damping: 40 }} />
+                )}
+                <Icon size={17} strokeWidth={1.9} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        </LayoutGroup>
         <div className="settings-content">
           <div className="settings-content-head">
             <h2>{current.label}</h2>
@@ -85,7 +112,7 @@ export function SettingsModal({
                 key={cat}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
+                exit={{ opacity: 0, transition: { duration: 0 } }}
                 transition={{ duration: 0.12 }}
               >
                 {cat === "general" && <GeneralSection />}

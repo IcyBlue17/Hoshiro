@@ -38,7 +38,7 @@ const forceOnboarding =
 export default function HubApp() {
   const { settings, update, reload } = useSettingsStore();
   const [page, setPage] = useState<Page>("home");
-  const [settingsOpen, setSettingsOpen] = useState<{ category: SettingsCategory } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState<{ category?: SettingsCategory } | null>(null);
   const [version, setVersion] = useState("");
   const [onboardingForced, setOnboardingForced] = useState(forceOnboarding);
 
@@ -48,7 +48,7 @@ export default function HubApp() {
     api.appInfo().then((i) => setVersion(i.version));
   }, []);
 
-  const openSettings = useCallback((category: SettingsCategory = "general") => setSettingsOpen({ category }), []);
+  const openSettings = useCallback((category?: SettingsCategory) => setSettingsOpen({ category }), []);
   const navigate = useCallback((p: Page) => setPage(p), []);
 
   const handleRoute = useCallback(
@@ -114,7 +114,7 @@ export default function HubApp() {
             </main>
             <SettingsModal
               open={!!settingsOpen}
-              initialCategory={settingsOpen?.category ?? "general"}
+              initialCategory={settingsOpen?.category}
               onClose={() => setSettingsOpen(null)}
             />
           </div>
