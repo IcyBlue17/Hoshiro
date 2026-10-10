@@ -1,0 +1,62 @@
+name: Release
+
+# 推送 v* 标签（如 v0.1.1）时编译 macOS（Apple 芯片 + Intel），签名更新包，发布正式版并附上 latest.json 供应用内自动更新。
+# 需要仓库 secrets：TAURI_SIGNING_PRIVATE_KEY、TAURI_SIGNING_PRIVATE_KEY_PASSWORD（无密码时设为空）。
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: aarch64
+            target: aarch64-apple-darwin
+          - name: x64
+            target: x86_64-apple-darwin
+    name: macos-${{ matrix.name }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - run: bun install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --target ${{ matrix.target }} --bundles app,dmg
+          tagName: ${{ github.ref_name }}
+          releaseName: Hoshiro ${{ github.ref_name }}
+          releaseBody: |
+            | 芯片 | 安装包 |
+            |---|---|
+            | Apple 芯片（M 系列） | `aarch64.dmg` |
+            | Intel | `x64.dmg` |
+
+            已安装旧版本的用户会通过应用内更新自动收到。安装包没有经过 Apple 公证，首次打开如果提示“已损坏”，在终端执行 `xattr -cr /Applications/Hoshiro.app`。
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
