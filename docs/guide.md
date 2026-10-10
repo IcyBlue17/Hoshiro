@@ -25,10 +25,7 @@
 
 - 波形跳动：正在收音。
 - 免提模式：左边取消，右边完成。
-- 扫光动画：正在识别和整理。
-- 出错时上方会弹出提示卡片，带「重试」「复制」等按钮。
-
-不录音时也想显示待机条，打开「设置 › 常规 › 在桌面上显示悬浮条」。点待机条会开始免提录音。
+- 动画：正在识别和整理。
 
 ### 快捷键
 
@@ -42,12 +39,10 @@
 
 | 服务商 | 需要填写 | 说明 |
 |---|---|---|
-| 小米 MiMo（推荐） | API Key，区域选「Global」或「中国」 | 中文效果和速度最好，自带标点。模型 `mimo-v2.5-asr` |
-| Cloudflare Workers AI | 账户 ID、API Token（需 Workers AI 权限） | 选「Whisper Large v3 Turbo」。服务端排队，通常 2~3 秒 |
+| 小米 MiMo（推荐）| API Key，区域选「Global」或「中国」 | 中文效果和速度最好，自带标点。模型 `mimo-v2.5-asr` |
+| Cloudflare Workers AI | 账户 ID、API Token（需 Workers AI 权限）| 选「Whisper Large v3 Turbo」。服务端排队，通常 2~3 秒 |
 | Azure Speech | Speech Key、区域（如 `eastasia`） | 流式，边说边传 |
 | Google Cloud Speech | 项目 ID、区域、模型；API Key 或服务账户 JSON 二选一 | 流式，项目需开通 Speech-to-Text |
-
-Cloudflare 的「Whisper 旧版」偶尔输出繁体，「Deepgram Nova-3」只支持英文。
 
 ### AI 改写
 
@@ -56,17 +51,6 @@ Cloudflare 的「Whisper 旧版」偶尔输出繁体，「Deepgram Nova-3」只�
 | Google Gemini | API Key([Google AI Studio](https://aistudio.google.com/apikey)) | 默认 `gemini-flash-latest` |
 | Anthropic Claude | API Key | 默认 `claude-haiku-5-5`，快且便宜 |
 | OpenAI 兼容 | Base URL、API Key、模型名 | OpenAI、OpenRouter、DeepSeek 和各种中转都选这个 |
-
-模型名可以点「获取模型列表」拉取。
-
-以 Vercel AI Gateway 为例：
-
-- 改写服务选「OpenAI 兼容」
-- Base URL:`https://ai-gateway.vercel.sh/v1`
-- API Key：在 Vercel 控制台 › AI Gateway › API Keys 创建
-- 模型名带厂商前缀，如 `google/gemini-2.5-flash-lite`。免费额度不能用所有模型，选到不能用的会提示「拒绝访问」并附原因
-
-想用 Claude 又要最快速度，可以选 Anthropic，Base URL 填 `https://ai-gateway.vercel.sh`（不加 `/v1`）。
 
 ### 思考强度
 
