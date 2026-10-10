@@ -1,0 +1,91 @@
+name: Nightly
+
+# 每次推送到 main 自动编译 macOS（Apple 芯片 + Intel），覆盖发布到 `nightly` 预发布版。
+# 预发布版不算 "latest"，正式版用户的自动更新不会拿到 nightly。只改文档时不触发。
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: aarch64
+            target: aarch64-apple-darwin
+          - name: x64
+            target: x86_64-apple-darwin
+    name: macos-${{ matrix.name }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - run: bun install --frozen-lockfile
+
+      # Nightly 不走自动更新，所以不生成更新包，也就不需要签名私钥。
+      - name: Build
+        run: bun run tauri build --target ${{ matrix.target }} --bundles dmg --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Rename
+        run: |
+          mkdir -p out
+          cp src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg "out/Hoshiro_nightly_${GITHUB_SHA::7}_${{ matrix.name }}.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-${{ matrix.name }}
+          path: out/*.dmg
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          short=${GITHUB_SHA::7}
+          cat > notes.md <<EOF
+          由 main 分支最新提交 [\`${short}\`](https://github.com/${GH_REPO}/commit/${GITHUB_SHA}) 自动编译，未经测试，可能不稳定，也不会自动更新。日常使用请下载[正式版](https://github.com/${GH_REPO}/releases/latest)。
+
+          | 芯片 | 安装包 |
+          |---|---|
+          | Apple 芯片（M 系列） | \`Hoshiro_nightly_${short}_aarch64.dmg\` |
+          | Intel | \`Hoshiro_nightly_${short}_x64.dmg\` |
+
+          首次打开如果提示“已损坏”，在终端执行 \`xattr -cr /Applications/Hoshiro.app\`。
+          EOF
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly out/*.dmg --prerelease --target "$GITHUB_SHA" \
+            --title "Nightly (${short})" --notes-file notes.md
