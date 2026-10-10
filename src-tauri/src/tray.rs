@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 use std::time::{Duration, Instant};
 use tauri::image::Image;
 use tauri::menu::{
-    AboutMetadata, CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu, SubmenuBuilder,
+    CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu, SubmenuBuilder,
 };
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
@@ -125,6 +125,7 @@ pub fn on_menu_event(app: &AppHandle, event: MenuEvent) {
         "tray:dictionary" => notify::navigate(app, "dictionary"),
         "tray:settings" | "app:settings" => notify::navigate(app, "settings"),
         "tray:paste_last" => app.state::<AppState>().send(Cmd::Hotkey(HotkeyAction::PasteLast)),
+        "app:about" => notify::navigate(app, "settings:about"),
         "tray:update" | "app:update" => crate::update::tray_action(app),
         "tray:quit" | "app:quit" => app.exit(0),
         "tray:mic:auto" => select_mic(app, None),
@@ -148,15 +149,8 @@ fn select_mic(app: &AppHandle, device: Option<String>) {
 }
 
 pub fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let about = PredefinedMenuItem::about(
-        app,
-        Some("关于 Hoshiro"),
-        Some(AboutMetadata {
-            name: Some("Hoshiro".into()),
-            version: Some(app.package_info().version.to_string()),
-            ..Default::default()
-        }),
-    )?;
+    // In-app About (Settings › 关于) rather than the stock macOS panel.
+    let about = MenuItem::with_id(app, "app:about", "关于 Hoshiro", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "app:settings", "设置…", true, Some("CmdOrCtrl+,"))?;
     let upd = MenuItem::with_id(app, "app:update", "检查更新…", true, None::<&str>)?;
     // Not `PredefinedMenuItem::quit`: its exit carries no code, which the run loop ignores (tray app).

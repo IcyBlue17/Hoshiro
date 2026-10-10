@@ -29,6 +29,7 @@ docs/NEXT.md
 docs/IMPLEMENTATION.md
 src-tauri/examples/
 scratch/
+scripts/
 *.jsonl
 
 # ── 系统与编辑器 ──

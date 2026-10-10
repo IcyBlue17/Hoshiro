@@ -7,7 +7,6 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
-    "gen:licenses": "node scripts/gen_licenses.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
