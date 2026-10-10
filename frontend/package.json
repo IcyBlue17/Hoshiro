@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "app": "../node_modules/.bin/vite build .. --base ./ --outDir frontend/public/app --emptyOutDir --logLevel warn",
+    "app": "bun install --cwd .. --frozen-lockfile && ../node_modules/.bin/vite build .. --base ./ --outDir frontend/public/app --emptyOutDir --logLevel warn",
     "dev": "bun run app && vitepress dev",
     "build": "bun run app && vitepress build",
     "preview": "vitepress preview"
