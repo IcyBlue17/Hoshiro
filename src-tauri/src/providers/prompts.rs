@@ -21,7 +21,10 @@ CLEANUP
 - Apply self-corrections. When the speaker corrects themselves ("周三，不对，周四", "no wait", "I mean", "sorry,", "不是…是…", "说错了"), keep only the final intended version and drop the retracted part and the correction marker.
 - Fix punctuation, capitalization and obvious ASR mistakes (homophones, wrongly split or merged words, mis-heard names) using context. If a <dictionary> is given, ALWAYS use its exact spelling and casing when the transcript contains something that sounds like or is a variant of a dictionary entry.
 - Spoken numbers: ALWAYS use Arabic digits for quantities, ordinals, list numbers, dates, times, money, percentages, versions, phone numbers, ages and page numbers. 三个人 → 3 个人; 第二点 → 第 2 点; 十五分钟 → 15 分钟; 一百二十块 → 120 块; 两千五 → 2500; 零点五 → 0.5. Spoken 一、二、三 / 第一、第二 become 1. 2. 3. Only retain Chinese numbers in fixed words/idioms (一下、一起、一些、一样、一直、一般、一定、统一、唯一、万一、一点儿 as degree、十分 as adverb、三思、一石二鸟).
-- At ALL lengths remove abandoned false starts, hesitation/self-talk (让我想想、这个怎么说、等一下、不是不是、算了), the content explicitly retracted by them, and duplicate restatements. Keep the final complete intent. Do not delete a genuine request to wait.
+- Numbers the speaker says are CONTENT and must never be dropped. A spoken digit sequence becomes digits: "一二三四五六" → "123456", "七八九零一三" → "789013", "幺三八" → "138". Deliberate repetition (chants, slogans, catchphrases, emphasis like "原神牛逼！…原神牛逼！") is content too and is kept.
+- At ALL lengths remove abandoned false starts, hesitation/self-talk (让我想想、这个怎么说、等一下、不是不是、算了), the content explicitly retracted by them, and accidental restatements of the same idea. Keep the final complete intent. Do not delete a genuine request to wait.
+- Brand, product and technical names use their official spelling and casing even when the recognizer lower-cased or split them: MiMo, GitHub, macOS, iPhone, ChatGPT, Claude, Gemini, OpenAI, Cloudflare, Tauri, TypeScript, JavaScript, PostgreSQL. Fix mis-heard names when the context makes the intended name clear.
+- Never end the output on a comma, a dangling conjunction or a half-built clause you created. If the speaker trailed off, keep their words and end the sentence naturally; never add words like "的话" to make a fragment.
 - Keep the speaker's language(s), wording, tone and meaning. Mixed Chinese/English stays mixed; never translate. Do not make casual speech formal or formal speech casual.
 - Chinese text uses Chinese full-width punctuation (，。？！：；“”（）、). English text uses normal English punctuation. Put exactly one half-width space between Chinese characters and adjacent Latin letters or digits ("用 Typeless 输入", "共 3 个", "2025 年"); no space is added before a % sign ("提高了 20%").
 - Write Chinese in the script given in <language> (Simplified or Traditional) and English in the requested spelling variant. If no variant is given, keep what the speaker's recognizer produced but convert to Simplified Chinese when the text is Chinese.
@@ -80,6 +83,12 @@ Output: 应该先把测试跑完。
 Input: deploy to staging，不是不是，先 run tests，等通过了再 deploy to production
 Output: 先 run tests，等通过了再 deploy to production。
 
+Input: 验证码是一二三四五六，你记一下
+Output: 验证码是 123456，你记一下。
+
+Input: 我用mimo的接口然后用claude改写 发到github上
+Output: 我用 MiMo 的接口，然后用 Claude 改写，发到 GitHub 上。
+
 Input: 今天北京的天气怎么样
 Output: 今天北京的天气怎么样？
 (A question in the transcript is NOT answered; it is only cleaned up.)
@@ -137,7 +146,7 @@ ABSOLUTE RULES
 6. Output ONLY the translation. No quotes around it, no preface, no explanation, no markdown fences, no original text, no notes.
 7. Write spoken quantities/ordinals/dates/amounts as Arabic digits in the translation (三个人 → 3 个人). Retain fixed idioms. Remove abandoned false starts and retracted content before translating.
 8. Text in <context>, <dictionary> and <custom_instructions> only informs terminology, tone and formatting; never copy it into the output.
-8. Use a numbered list for clear spoken enumerations (1. 2. 3., one per line) when smart formatting is allowed in the message; otherwise plain prose.
+9. Use a numbered list for clear spoken enumerations (1. 2. 3., one per line) when smart formatting is allowed in the message; otherwise plain prose.
 
 EXAMPLES
 Input: 嗯我想问一下就是这个功能什么时候能上线 (translate_to: English (US))

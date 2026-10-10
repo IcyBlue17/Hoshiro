@@ -78,7 +78,7 @@ async fn rewrite_with(
 ) -> anyhow::Result<RewriteOutcome> {
     let system = prompts::system_prompt(req.mode, req.smart_formatting);
     let user = prompts::build_user_message(req);
-    let raw = complete(provider, ep, &system, &user, req.mode == Mode::Ask, timeout_secs).await?;
+    let raw = complete(provider, ep, &system, &user, req.mode == Mode::Ask, timeout_secs, true).await?;
     finalize(req, &raw)
 }
 
@@ -277,6 +277,8 @@ pub(crate) async fn complete(
     user: &str,
     json_mode: bool,
     timeout_secs: u64,
+    // Interactive rewrites: suppress optional model reasoning for latency. Background jobs keep defaults.
+    fast: bool,
 ) -> anyhow::Result<String> {
     if ep.api_key.trim().is_empty() {
         return Err(anyhow!("未配置{}的 API Key", provider_label(provider)));
@@ -287,7 +289,7 @@ pub(crate) async fn complete(
     let timeout = Duration::from_secs(timeout_secs.max(1));
     let r = match provider {
         LlmProvider::Gemini => gemini_complete(ep, system, user, json_mode, timeout).await,
-        LlmProvider::Anthropic => anthropic_complete(ep, system, user, timeout).await,
+        LlmProvider::Anthropic => anthropic_complete(ep, system, user, timeout, fast).await,
         LlmProvider::Openai => openai_complete(ep, system, user, timeout).await,
     };
     r.map_err(anyhow::Error::new)
@@ -416,27 +418,39 @@ fn anthropic_base(ep: &LlmEndpointConfig) -> String {
     base.strip_suffix("/v1").unwrap_or(base).to_string()
 }
 
-async fn anthropic_complete(ep: &LlmEndpointConfig, system: &str, user: &str, timeout: Duration) -> Result<String, Failure> {
+async fn anthropic_complete(ep: &LlmEndpointConfig, system: &str, user: &str, timeout: Duration, fast: bool) -> Result<String, Failure> {
     let model = ep.model.trim().to_string();
     let url = format!("{}/v1/messages", anthropic_base(ep));
     let headers = [("x-api-key", ep.api_key.trim().to_string()), ("anthropic-version", "2023-06-01".to_string())];
-    let temp_key = param_key(LlmProvider::Anthropic, &model, "temperature");
-    let mut with_temp = !REJECTED_PARAMS.lock().contains(&temp_key);
-    for _ in 0..2 {
+    // Current Claude models think adaptively by default, which multiplies rewrite latency for no gain.
+    // Prefer thinking off; models that refuse that get low effort; older models get neither.
+    // Sampling params are left at defaults: current models reject non-default temperature.
+    let no_think_key = param_key(LlmProvider::Anthropic, &model, "thinking");
+    let effort_key = param_key(LlmProvider::Anthropic, &model, "effort");
+    for _ in 0..3 {
+        let (try_no_think, try_effort) = {
+            let rejected = REJECTED_PARAMS.lock();
+            let no_think = fast && !rejected.contains(&no_think_key);
+            (no_think, fast && !no_think && !rejected.contains(&effort_key))
+        };
         let mut body = json!({
             "model": model,
             "max_tokens": 4096,
             "system": system,
             "messages": [{ "role": "user", "content": user }]
         });
-        if with_temp {
-            body["temperature"] = json!(0.2);
+        if try_no_think {
+            body["thinking"] = json!({ "type": "disabled" });
+        } else if try_effort {
+            body["output_config"] = json!({ "effort": "low" });
         }
         match post_json("Anthropic", &url, &headers, &body, timeout).await {
             Ok(v) => return extract_anthropic(&v),
-            Err(f) if with_temp && mentions(&f, "temperature") => {
-                REJECTED_PARAMS.lock().insert(temp_key.clone());
-                with_temp = false;
+            Err(f) if try_no_think && f.status == Some(400) && mentions(&f, "thinking") => {
+                REJECTED_PARAMS.lock().insert(no_think_key.clone());
+            }
+            Err(f) if try_effort && f.status == Some(400) && mentions(&f, "effort") => {
+                REJECTED_PARAMS.lock().insert(effort_key.clone());
             }
             Err(f) => return Err(f),
         }
@@ -788,6 +802,29 @@ mod tests {
         let lower = reqs[0].to_lowercase();
         assert!(lower.contains("x-api-key: ak") && lower.contains("anthropic-version: 2023-06-01"));
         assert!(reqs[0].contains("\"max_tokens\":4096"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_turns_thinking_off_then_falls_back_and_remembers() {
+        use crate::providers::http::testserver::serve;
+        let ok = r#"{"content":[{"type":"text","text":"你好世界"}]}"#;
+        let (base, seen) = serve(vec![
+            (400, r#"{"type":"error","error":{"type":"invalid_request_error","message":"thinking.type disabled is not supported for this model"}}"#),
+            (400, r#"{"type":"error","error":{"type":"invalid_request_error","message":"effort is not supported for this model"}}"#),
+            (200, ok),
+            (200, ok),
+        ])
+        .await;
+        let ep = LlmEndpointConfig { api_key: "ak".into(), base_url: base, model: "claude-test-fallback".into() };
+        let r = req(Mode::Dictation, "嗯 你好 世界");
+        assert_eq!(rewrite_with(LlmProvider::Anthropic, &ep, &r, 10).await.unwrap(), RewriteOutcome::Insert("你好世界".into()));
+        assert_eq!(rewrite_with(LlmProvider::Anthropic, &ep, &r, 10).await.unwrap(), RewriteOutcome::Insert("你好世界".into()));
+        let reqs = seen.lock().unwrap();
+        assert_eq!(reqs.len(), 4);
+        assert!(reqs[0].contains(r#""thinking":{"type":"disabled"}"#) && !reqs[0].contains("temperature"));
+        assert!(reqs[1].contains(r#""effort":"low""#) && !reqs[1].contains("thinking"));
+        assert!(!reqs[2].contains("effort") && !reqs[2].contains("thinking"));
+        assert!(!reqs[3].contains("effort") && !reqs[3].contains("thinking"));
     }
 
     #[tokio::test]
