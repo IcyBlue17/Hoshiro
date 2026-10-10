@@ -1,7 +1,7 @@
 name: Release
 
 # 推送 v* 标签（如 v0.1.1）时编译 macOS（Apple 芯片 + Intel），签名更新包，发布正式版并附上 latest.json 供应用内自动更新。
-# 需要仓库 secrets：TAURI_SIGNING_PRIVATE_KEY、TAURI_SIGNING_PRIVATE_KEY_PASSWORD（无密码时设为空）。
+# 需要仓库 secrets：TAURI_SIGNING_PRIVATE_KEY（更新包签名）、MACOS_CERT_P12 / MACOS_CERT_PASSWORD（代码签名证书）。
 on:
   push:
     tags: ["v*"]
@@ -41,11 +41,31 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      # 用固定的自签名证书签名（不是 ad-hoc），app 的签名身份在各版本间保持不变，
+      # 更新后系统不会收回辅助功能 / 输入监控权限。证书不受 Gatekeeper 信任，首次打开仍需 xattr。
+      - name: Import code signing certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_P12" ]; then echo "::error::缺少 secret MACOS_CERT_P12"; exit 1; fi
+          kc="$RUNNER_TEMP/signing.keychain-db"; kcpw="$(openssl rand -hex 16)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kcpw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kcpw" "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kcpw" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          security find-identity -p codesigning "$kc"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: Hoshiro Self-Signed
         with:
           args: --target ${{ matrix.target }} --bundles app,dmg
           tagName: ${{ github.ref_name }}
@@ -57,6 +77,24 @@ jobs:
             | Intel | `x64.dmg` |
 
             已安装旧版本的用户会通过应用内更新自动收到。安装包没有经过 Apple 公证，首次打开如果提示“已损坏”，在终端执行 `xattr -cr /Applications/Hoshiro.app`。
-          releaseDraft: false
+          releaseDraft: true # 两个架构都通过签名检查后，由 publish 任务转为正式版
           prerelease: false
           includeUpdaterJson: true
+
+      - name: Verify code signature
+        run: |
+          app=$(ls -d src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app | head -1)
+          req=$(codesign -d -r- "$app" 2>&1 | grep designated)
+          echo "$req"
+          echo "$req" | grep -q 'certificate leaf' || { echo "::error::app 不是用证书签名的（可能退回了 ad-hoc）"; exit 1; }
+          codesign --verify --deep --strict "$app"
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "${{ github.ref_name }}" --draft=false --latest
