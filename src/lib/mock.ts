@@ -255,6 +255,7 @@ export async function mockInvoke<T>(cmd: string, args: any = {}): Promise<T> {
         longestSessionSecs: 184, averageSessionSecs: 38.5, averageWordsPerSession: 157,
       });
     }
+    case "app_icons": return r({});
     case "get_stats": return r(mockStats());
     case "get_profile": return r(structuredClone(profile));
     case "run_personalization": {

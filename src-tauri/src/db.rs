@@ -485,12 +485,12 @@ impl Db {
         let (mut a_by, mut l_by) = (BTreeMap::<String, Vec<u64>>::new(), BTreeMap::<String, Vec<u64>>::new());
         let mut session_secs_sum = 0.0;
         let mut stmt = conn.prepare(
-            "SELECT created_at, mode, status, duration_secs, words, app_name, source, asr_ms, llm_ms, total_ms, asr_provider, llm_model FROM history")?;
-        type HRow = (String, String, String, f64, u64, Option<String>, String, Option<u64>, Option<u64>, Option<u64>, Option<String>, Option<String>);
+            "SELECT created_at, mode, status, duration_secs, words, app_name, source, asr_ms, llm_ms, total_ms, asr_provider, llm_model, bundle_id FROM history")?;
+        type HRow = (String, String, String, f64, u64, Option<String>, String, Option<u64>, Option<u64>, Option<u64>, Option<String>, Option<String>, Option<String>);
         let rows = stmt.query_map([], |r| Ok::<HRow, _>((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, Option<f64>>(3)?.unwrap_or(0.0), r.get::<_, Option<i64>>(4)?.unwrap_or(0).max(0) as u64,
-            r.get(5)?, r.get::<_, Option<String>>(6)?.unwrap_or_default(), r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?)))?;
+            r.get(5)?, r.get::<_, Option<String>>(6)?.unwrap_or_default(), r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?, r.get(12)?)))?;
         for row in rows {
-            let (ts, mode, status, audio, words, app, source, asr_ms, llm_ms, total_ms, asr_provider, llm_model) = row?;
+            let (ts, mode, status, audio, words, app, source, asr_ms, llm_ms, total_ms, asr_provider, llm_model, bundle_id) = row?;
             let local = DateTime::parse_from_rfc3339(&ts)?.with_timezone(&chrono::Local);
             let date = local.date_naive().to_string();
             if date < cutoff { continue; }
@@ -510,12 +510,16 @@ impl Db {
                 None if source == "typeless" => "Typeless 导入".to_string(),
                 None => "未知应用".to_string(),
             };
+            let bundle = bundle_id.filter(|b| !b.trim().is_empty())
+                .or_else(|| (app == "Typeless 导入").then(|| "now.typeless.desktop".to_string()));
             for bucket in [&mut stats.total, daily.entry(date.clone()).or_default(), modes.entry(mode.clone()).or_default(), apps.entry(app.clone()).or_default()] {
                 bucket.words += words; bucket.audio_secs += audio;
             }
             daily.get_mut(&date).unwrap().sessions += 1;
             modes.get_mut(&mode).unwrap().sessions += 1;
-            apps.get_mut(&app).unwrap().sessions += 1;
+            let app_bucket = apps.get_mut(&app).unwrap();
+            app_bucket.sessions += 1;
+            if app_bucket.bundle_id.is_none() { app_bucket.bundle_id = bundle; }
             stats.hours[local.hour() as usize] += 1;
             stats.weekdays[local.weekday().num_days_from_monday() as usize] += 1;
             stats.longest_session_secs = stats.longest_session_secs.max(audio);

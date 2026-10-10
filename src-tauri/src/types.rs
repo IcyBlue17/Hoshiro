@@ -501,6 +501,9 @@ pub struct UsageBucket {
     /// Median speech-recognition / rewrite latency for this model (ms), when history has timings.
     pub median_ms: Option<u64>,
     pub latency_samples: u64,
+    /// App buckets: bundle id of the app (for its icon), when known.
+    #[serde(default)]
+    pub bundle_id: Option<String>,
 }
 
 /// Distribution summary over a set of timings (ms). `samples == 0` means no data.

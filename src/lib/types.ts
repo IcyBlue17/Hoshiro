@@ -356,6 +356,8 @@ export interface UsageBucket {
   cachedTokens: number;
   medianMs: number | null;
   latencySamples: number;
+  /** App buckets: bundle id of the app (for its icon), when known. */
+  bundleId?: string | null;
 }
 export interface LatencyStat {
   samples: number;

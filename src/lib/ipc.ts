@@ -107,6 +107,9 @@ export const api = {
   /** Forget everything learned (keeps dictionary words). */
   resetProfile: () => call<PersonalProfile>("reset_profile"),
 
+  /** PNG data URLs of installed apps' icons, keyed by bundle id (missing apps omitted). */
+  appIcons: (bundleIds: string[]) => call<Record<string, string>>("app_icons", { bundleIds }),
+
   // ── stats ──
   getStats: () => call<Stats>("get_stats"),
   getUsage: (days = 30) => call<UsageStats>("get_usage", { days }),

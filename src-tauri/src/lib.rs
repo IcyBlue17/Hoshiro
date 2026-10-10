@@ -299,6 +299,7 @@ pub fn run() {
             commands::bar_set_hit_rects,
             commands::bar_get_state,
             commands::bar_close_answer,
+            commands::app_icons,
         ])
         .setup(move |app| setup(app, autostart_launch))
         .build(tauri::generate_context!());

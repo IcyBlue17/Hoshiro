@@ -143,10 +143,6 @@ function Body({ data, range, shortcuts }: { data: UsageStats; range: number; sho
         <span><b>{num(data.dictionaryWords)}</b> 个词典词条（自动学习 {num(data.autoWords)} 个）</span>
         <span>所选期间失败的会话 <b>{num(data.errorSessions)}</b></span>
       </div>
-      <p className="us-note">
-        语音识别按音频时长计费，改写模型按 token 计费。Token 只统计服务商实际返回的数字，不估算旧记录或未报告的部分，包含连接测试和个性化分析；重试请求会单独计入。实际费用以服务商账单为准。
-        会话、文字、时长和耗时来自当前保留的历史（含导入记录），删除历史会影响这些统计；模型用量独立保留，不含文本内容。
-      </p>
     </div>
   );
 }

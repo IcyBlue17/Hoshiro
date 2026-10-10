@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { UsageBucket, UsageStats } from "../../lib/types";
 import { formatWords } from "../format";
-import { fillDays, initial, minutesText, msParts, msText, nameHue, niceMax, num, splitLabel, tokenText } from "./util";
+import { fillDays, minutesText, msParts, msText, niceMax, num, splitLabel, tokenText } from "./util";
+import { api } from "../../lib/ipc";
 
 /** Flips to true one frame after mount so CSS transitions animate from the collapsed state. */
 function useRise(dep?: unknown): boolean {
@@ -96,7 +97,7 @@ export function SpeedCard({ stats }: { stats: UsageStats }) {
   if (total.samples === 0) {
     return (
       <Card title="速度">
-        <Empty>从现在起，每次会话的耗时都会记录在这里。<br />之前的历史没有耗时数据。</Empty>
+        <Empty>暂无数据</Empty>
       </Card>
     );
   }
@@ -108,12 +109,6 @@ export function SpeedCard({ stats }: { stats: UsageStats }) {
     { key: "llm", label: "改写", ms: llmMs, color: "var(--us-llm)" },
     { key: "other", label: "上屏等其他", ms: other, color: "var(--us-other)" },
   ].filter((p) => p.ms > 0 || p.key !== "other");
-  let hint = "识别与改写耗时接近";
-  if (asrMs + llmMs > 0) {
-    if (asrMs / (asrMs + llmMs) >= 0.58) hint = "大部分时间花在语音识别上";
-    else if (llmMs / (asrMs + llmMs) >= 0.58) hint = "大部分时间花在改写上";
-  }
-  if (llm.samples === 0) hint = "未启用改写模型，耗时几乎全部是语音识别";
   const big = msParts(total.meanMs);
   return (
     <Card title="速度" sub={`基于 ${num(total.samples)} 次会话`}>
@@ -135,7 +130,6 @@ export function SpeedCard({ stats }: { stats: UsageStats }) {
           </div>
         ))}
       </div>
-      <div className="us-hint">{hint}</div>
     </Card>
   );
 }
@@ -148,7 +142,7 @@ export function OutcomeCard({ stats }: { stats: UsageStats }) {
   if (all === 0) {
     return (
       <Card title="结果">
-        <Empty>还没有会话记录。</Empty>
+        <Empty>暂无数据</Empty>
       </Card>
     );
   }
@@ -162,7 +156,7 @@ export function OutcomeCard({ stats }: { stats: UsageStats }) {
   return (
     <Card title="结果" sub={`共 ${num(all)} 次会话`}>
       <div className="us-rate">
-        <div className="us-big"><b>{rate}</b><span>%</span><span className="us-meta" style={{ marginLeft: 6, fontWeight: 400 }}>成功率（完成 / 全部会话）</span></div>
+        <div className="us-big"><b>{rate}</b><span>%</span><span className="us-big-label">成功率</span></div>
       </div>
       <div className="us-split" role="img" aria-label="会话结果占比">
         {items.filter((i) => i.n > 0).map((i) => (
@@ -190,15 +184,14 @@ const MODES = [
   { key: "ask", label: "问任何问题", color: "var(--warning)", shortcut: "askAnything" },
 ] as const;
 
-export function ModeCard({ stats, shortcuts }: { stats: UsageStats; shortcuts: Record<string, string> }) {
+export function ModeCard({ stats }: { stats: UsageStats; shortcuts?: Record<string, string> }) {
   const rows = MODES.map((m) => ({ ...m, b: stats.modes.find((x) => x.label === m.key) }));
   const used = rows.filter((r) => (r.b?.sessions ?? 0) > 0);
   const total = used.reduce((s, r) => s + (r.b?.sessions ?? 0), 0);
-  const unused = rows.filter((r) => !(r.b?.sessions ?? 0));
   return (
-    <Card title="使用方式" sub={total ? `${num(total)} 次已完成` : undefined}>
+    <Card title="使用方式">
       {total === 0 ? (
-        <Empty>完成一次口述、翻译或提问后，这里会显示您的使用习惯。</Empty>
+        <Empty>暂无数据</Empty>
       ) : (
         <>
           <div className="us-split" role="img" aria-label="使用方式占比">
@@ -211,20 +204,15 @@ export function ModeCard({ stats, shortcuts }: { stats: UsageStats; shortcuts: R
               <div className={`us-leg${r.b?.sessions ? "" : " dim"}`} key={r.key}>
                 <span className="dot" style={{ background: r.color }} />
                 <span>{r.label}</span>
-                <span className="val">
-                  {r.b?.sessions ? (<><b>{num(r.b.sessions)}</b> 次 · {num(r.b.words)} 字</>) : "尚未使用"}
-                </span>
+                <span className="val">{r.b?.sessions ? <><b>{num(r.b.sessions)}</b> 次</> : "—"}</span>
               </div>
             ))}
           </div>
-          <div className="us-meta" style={{ marginTop: 14 }}>
-            平均每次 <b>{Math.round(stats.averageWordsPerSession)}</b> 字 · 平均 <b>{Math.round(stats.averageSessionSecs)}</b> 秒 · 最长 <b>{Math.round(stats.longestSessionSecs)}</b> 秒
+          <div className="us-facts">
+            <div><b>{Math.round(stats.averageWordsPerSession)}</b><span>字 / 次</span></div>
+            <div><b>{Math.round(stats.averageSessionSecs)}</b><span>平均秒数</span></div>
+            <div><b>{Math.round(stats.longestSessionSecs)}</b><span>最长秒数</span></div>
           </div>
-          {unused.length > 0 && used.length === 1 && (
-            <div className="us-hint">
-              还可以试试{unused.map((u) => `${u.label}（${shortcuts[u.shortcut] || "未设置快捷键"}）`).join("、")}。
-            </div>
-          )}
         </>
       )}
     </Card>
@@ -238,27 +226,25 @@ export function AppsCard({ stats }: { stats: UsageStats }) {
   const up = useRise(stats.total.words);
   const all = Math.max(1, stats.total.words);
   const top = Math.max(1, ...apps.map((a) => a.words));
+  const icons = useAppIcons(apps.map((a) => a.bundleId).filter((b): b is string => !!b));
   return (
-    <Card title="常用应用" sub={apps.length ? "按生成字数" : undefined}>
+    <Card title="常用应用">
       {apps.length === 0 ? (
-        <Empty>还没有应用使用记录。</Empty>
+        <Empty>暂无数据</Empty>
       ) : (
         <div className="us-apps">
           {apps.map((a) => {
-            const unknown = a.label === "未知应用";
-            const color = unknown ? "var(--text-3)" : `hsl(${nameHue(a.label)} 58% 46%)`;
+            const icon = a.bundleId ? icons[a.bundleId] : undefined;
             return (
               <div className="us-app" key={a.label}>
-                <div className="us-avatar" style={{ background: color }} aria-hidden>
-                  {unknown ? "?" : initial(a.label)}
-                </div>
-                <div style={{ minWidth: 0 }}>
+                {icon ? <img className="us-app-icon" src={icon} alt="" /> : <div className="us-app-icon placeholder" aria-hidden />}
+                <div className="us-app-main">
                   <div className="us-app-top">
                     <span>{a.label}</span>
-                    <span>{num(a.words)} 字 · {a.sessions} 次</span>
+                    <span>{num(a.words)} 字</span>
                   </div>
                   <div className="us-track">
-                    <i style={{ width: up ? `${(100 * a.words) / top}%` : 0, background: color }} />
+                    <i style={{ width: up ? `${(100 * a.words) / top}%` : 0 }} />
                   </div>
                 </div>
                 <div className="us-pct">{Math.round((100 * a.words) / all)}%</div>
@@ -269,6 +255,18 @@ export function AppsCard({ stats }: { stats: UsageStats }) {
       )}
     </Card>
   );
+}
+
+function useAppIcons(ids: string[]): Record<string, string> {
+  const key = ids.join(",");
+  const [icons, setIcons] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!key) return;
+    let live = true;
+    api.appIcons(key.split(",")).then((r) => live && setIcons(r)).catch(() => {});
+    return () => { live = false; };
+  }, [key]);
+  return icons;
 }
 
 // ───────────────────────── time of day ─────────────────────────
@@ -333,13 +331,12 @@ export function TimeCard({ stats }: { stats: UsageStats }) {
 
 // ───────────────────────── model tables ─────────────────────────
 
-function Svc({ label, kind }: { label: string; kind: "asr" | "llm" }) {
+function Svc({ label }: { label: string; kind?: "asr" | "llm" }) {
   const [name, model] = splitLabel(label);
   return (
     <div className="us-svc">
       <b>{name}</b>
       {model && <span>{model}</span>}
-      <span hidden>{kind}</span>
     </div>
   );
 }

@@ -600,3 +600,33 @@ pub async fn get_usage(state: State<'_, AppState>, days: u32) -> CmdResult<Usage
     let db = state.db.clone();
     blocking(move || crate::usage::summary(&db, days)).await?.map_err(any_err)
 }
+
+/// App icons as PNG data URLs, keyed by bundle id (missing apps are omitted). Cached for the process lifetime.
+#[tauri::command]
+pub async fn app_icons(bundle_ids: Vec<String>) -> CmdResult<std::collections::HashMap<String, String>> {
+    use base64::Engine;
+    static CACHE: once_cell::sync::Lazy<parking_lot::Mutex<std::collections::HashMap<String, Option<String>>>> =
+        once_cell::sync::Lazy::new(Default::default);
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        let mut out = std::collections::HashMap::new();
+        for id in bundle_ids.into_iter().take(32) {
+            let cached = CACHE.lock().get(&id).cloned();
+            let url = match cached {
+                Some(v) => v,
+                None => {
+                    let v = crate::platform::icons::app_icon_png(&id, 64)
+                        .map(|png| format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)));
+                    CACHE.lock().insert(id.clone(), v.clone());
+                    v
+                }
+            };
+            if let Some(url) = url {
+                out.insert(id, url);
+            }
+        }
+        out
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(out)
+}

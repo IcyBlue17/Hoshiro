@@ -8,6 +8,7 @@ mod gesture;
 mod mac;
 pub mod context;
 pub mod hotkey;
+pub mod icons;
 pub mod insert;
 pub mod media;
 pub mod permissions;
