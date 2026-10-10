@@ -86,7 +86,8 @@ jobs:
           app=$(ls -d src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app | head -1)
           req=$(codesign -d -r- "$app" 2>&1 | grep designated)
           echo "$req"
-          echo "$req" | grep -q 'certificate leaf' || { echo "::error::app 不是用证书签名的（可能退回了 ad-hoc）"; exit 1; }
+          # 自签名证书的身份要求写作 "certificate root"，ad-hoc 签名则是 "cdhash"
+          if ! echo "$req" | grep -q 'certificate' || echo "$req" | grep -q 'cdhash'; then echo "::error::app 不是用证书签名的（可能退回了 ad-hoc）"; exit 1; fi
           codesign --verify --deep --strict "$app"
 
   publish:
