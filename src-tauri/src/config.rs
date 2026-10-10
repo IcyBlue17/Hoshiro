@@ -165,6 +165,13 @@ pub fn sanitize(s: &mut Settings) {
         &mut s.asr.google.project_id, &mut s.asr.google.location, &mut s.asr.google.model] {
         *value = value.trim().to_string();
     }
+    if s.asr.google.model.is_empty() {
+        s.asr.google.model = d.asr.google.model.clone();
+    }
+    // Chirp models only exist in regional endpoints; the old default "global" made them fail.
+    if s.asr.google.location.is_empty() || (s.asr.google.location == "global" && s.asr.google.model.starts_with("chirp")) {
+        s.asr.google.location = d.asr.google.location.clone();
+    }
 
     s.asr.mimo.api_key = s.asr.mimo.api_key.trim().to_string();
     s.asr.mimo.base_url = s.asr.mimo.base_url.trim().trim_end_matches('/').to_string();
@@ -335,6 +342,26 @@ mod tests {
         s.llm.openai.model = " ".into();
         sanitize(&mut s);
         assert_eq!(s.llm.openai.model, "");
+    }
+
+    #[test]
+    fn google_chirp_moves_off_global_and_needs_a_service_account() {
+        let mut s = Settings::default();
+        s.asr.provider = "google".into();
+        s.asr.google.location = "global".into();
+        s.asr.google.api_key = "AIza-test".into();
+        sanitize(&mut s);
+        assert_eq!(s.asr.google.location, "us");
+        assert!(!s.asr.ready(), "an API key alone cannot call Speech-to-Text v2");
+        s.asr.google.service_account_json = r#"{"type":"service_account","project_id":"demo-123"}"#.into();
+        assert!(s.asr.ready());
+        assert_eq!(s.asr.google.resolved_project().as_deref(), Some("demo-123"));
+        s.asr.google.project_id = "explicit".into();
+        assert_eq!(s.asr.google.resolved_project().as_deref(), Some("explicit"));
+        s.asr.google.model = "long".into();
+        s.asr.google.location = "global".into();
+        sanitize(&mut s);
+        assert_eq!(s.asr.google.location, "global", "non-chirp models may stay on global");
     }
 
     #[test]

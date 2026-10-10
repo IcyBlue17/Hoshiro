@@ -13,9 +13,19 @@ export const MIMO_TOKEN_PLAN = "https://token-plan-cn.xiaomimimo.com/v1";
 
 type Plan = "payg" | "plan" | "custom";
 
+/** `project_id` inside a pasted service-account JSON, if any. */
+function googleJsonProject(json: string): string {
+  try {
+    const p = JSON.parse(json)?.project_id;
+    return typeof p === "string" ? p : "";
+  } catch {
+    return "";
+  }
+}
+
 export const ASR_NAMES = { mimo: "MiMo", cloudflare: "Cloudflare", azure: "Azure", google: "Google" };
 export function asrReady(asr: AsrConfig) {
-  if (asr.provider === "google") return !!asr.google.projectId.trim() && !!(asr.google.apiKey.trim() || asr.google.serviceAccountJson.trim());
+  if (asr.provider === "google") return !!asr.google.serviceAccountJson.trim() && !!(asr.google.projectId.trim() || googleJsonProject(asr.google.serviceAccountJson));
   if (asr.provider === "cloudflare") return !!asr.cloudflare.apiKey.trim() && !!asr.cloudflare.accountId.trim();
   if (asr.provider === "azure") return !!asr.azure.apiKey.trim() && !!asr.azure.region.trim();
   return !!asr.mimo.apiKey.trim();
@@ -98,13 +108,12 @@ function OtherAsrForm() {
       <Row title="区域" desc="须与 Speech 资源区域一致，例如 eastasia。"><TextField label="Azure 区域" value={c.azure.region} onCommit={(v) => update((d) => void (d.asr.azure.region = v.trim()))} width={300} /></Row>
     </>}
     {provider === "google" && <>
-      <Row title="项目 ID"><TextField label="Google 项目 ID" value={c.google.projectId} onCommit={(v) => update((d) => void (d.asr.google.projectId = v.trim()))} width={300} /></Row>
-      <Row title="区域" desc="区域须支持所选模型，例如 global、us 或 eu。"><TextField label="Google 区域" value={c.google.location} onCommit={(v) => update((d) => void (d.asr.google.location = v.trim()))} width={300} /></Row>
-      <Row title="模型"><TextField label="Google 模型" value={c.google.model} onCommit={(v) => update((d) => void (d.asr.google.model = v.trim()))} width={300} /></Row>
-      <Row title="API Key" desc="使用服务账户时可留空；项目需已启用 Speech-to-Text。"><SecretInput label="Google API Key" value={c.google.apiKey} onCommit={(v) => update((d) => void (d.asr.google.apiKey = v.trim()))} width={300} /></Row>
-      <Row title="服务账户 JSON" desc="与 API Key 二选一，优先使用服务账户。" stacked>
+      <Row title="服务账户 JSON" desc="Speech-to-Text v2 只支持服务账户，不支持 API Key。服务账户需要“Cloud Speech 客户端”角色，项目需已启用 Speech-to-Text。" stacked>
         <SecretInput label="Google 服务账户 JSON" value={c.google.serviceAccountJson} onCommit={(v) => update((d) => void (d.asr.google.serviceAccountJson = v.trim()))} width={400} placeholder="粘贴服务账户 JSON" />
       </Row>
+      <Row title="项目 ID" desc={googleJsonProject(c.google.serviceAccountJson) ? `留空则使用 JSON 中的 ${googleJsonProject(c.google.serviceAccountJson)}` : "留空则使用 JSON 中的项目"}><TextField label="Google 项目 ID" value={c.google.projectId} onCommit={(v) => update((d) => void (d.asr.google.projectId = v.trim()))} width={300} placeholder="可选" /></Row>
+      <Row title="区域" desc="chirp_3 可用 us 或 eu，不支持 global。"><TextField label="Google 区域" value={c.google.location} onCommit={(v) => update((d) => void (d.asr.google.location = v.trim()))} width={300} /></Row>
+      <Row title="模型"><TextField label="Google 模型" value={c.google.model} onCommit={(v) => update((d) => void (d.asr.google.model = v.trim()))} width={300} /></Row>
     </>}
     <Row title="连接测试" desc="会产生极少量用量。"><TestButton tester={tester} disabled={!asrReady(c)} /></Row>
   </Group>;

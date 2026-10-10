@@ -39,7 +39,7 @@ export const defaultSettings: Settings = {
   asr: { provider: "mimo",
     cloudflare: { accountId: "", apiKey: "", model: "@cf/openai/whisper-large-v3-turbo" },
     azure: { apiKey: "", region: "eastasia" },
-    google: { apiKey: "", serviceAccountJson: "", projectId: "", location: "global", model: "chirp_3" }, mimo: { apiKey: "", baseUrl: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5-asr" } },
+    google: { apiKey: "", serviceAccountJson: "", projectId: "", location: "us", model: "chirp_3" }, mimo: { apiKey: "", baseUrl: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5-asr" } },
   llm: {
     enabled: true,
     provider: "gemini",

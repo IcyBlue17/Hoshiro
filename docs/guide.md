@@ -36,7 +36,7 @@
 | 小米 MiMo（推荐） | API Key、套餐（按量付费 / Token Plan） | 中文识别准确率高，响应快，自带标点。模型：`mimo-v2.5-asr`。按量付费的 Key 以 `sk-` 开头，Token Plan 的 Key 以 `tp-` 开头，两者不能混用 |
 | Cloudflare Workers AI | Account ID、API Token | 模型推荐 `Whisper Large v3 Turbo`。响应受服务端排队影响（约 2~3 秒） |
 | Azure Speech | Speech Key、Region（如 `eastasia`） | 流式传输，边说边识别 |
-| Google Cloud Speech | 项目 ID、区域、模型；API Key 或 Service Account JSON | 流式传输，需在 GCP 启用 Speech-to-Text API |
+| Google Cloud Speech | Service Account JSON（不支持 API Key）；区域默认 `us`，项目 ID 可从 JSON 读取 | 流式传输，需启用 Speech-to-Text API，服务账户需“Cloud Speech 客户端”角色 |
 
 ### AI 改写 (LLM)
 

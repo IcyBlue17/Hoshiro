@@ -102,14 +102,15 @@ async fn google(
 ) -> anyhow::Result<(String, bool)> {
     use google_cloud_speech_v2::{client::Speech, model::*};
     let c = &cfg.google;
-    let credentials = if !c.service_account_json.trim().is_empty() {
-        let key: Value = serde_json::from_str(&c.service_account_json).context("Google 服务账户 JSON 格式不正确")?;
-        google_cloud_auth::credentials::service_account::Builder::new(key)
-            .build()
-            .map_err(|e| service_error("Google", e))?
-    } else {
-        google_cloud_auth::credentials::api_key_credentials::Builder::new(c.api_key.trim()).build()
-    };
+    // Speech-to-Text v2 does not accept API keys (401 "API keys are not supported by this API").
+    if c.service_account_json.trim().is_empty() {
+        bail!("Google 语音识别需要服务账户 JSON（Speech-to-Text v2 不支持 API Key）");
+    }
+    let key: Value = serde_json::from_str(&c.service_account_json).context("Google 服务账户 JSON 格式不正确")?;
+    let project = c.resolved_project().context("请填写 Google 项目 ID")?;
+    let credentials = google_cloud_auth::credentials::service_account::Builder::new(key)
+        .build()
+        .map_err(|e| service_error("Google", e))?;
     if !c.location.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         bail!("Google 区域格式不正确");
     }
@@ -144,7 +145,7 @@ async fn google(
     sender
         .send(
             StreamingRecognizeRequest::new()
-                .set_recognizer(format!("projects/{}/locations/{}/recognizers/_", c.project_id, c.location))
+                .set_recognizer(format!("projects/{}/locations/{}/recognizers/_", project, c.location))
                 .set_streaming_config(StreamingRecognitionConfig::new().set_config(config)),
         )
         .await

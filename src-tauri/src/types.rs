@@ -677,7 +677,18 @@ pub struct GoogleAsrConfig {
     pub location: String, pub model: String,
 }
 impl Default for GoogleAsrConfig {
-    fn default() -> Self { Self { api_key: String::new(), service_account_json: String::new(), project_id: String::new(), location: "global".into(), model: "chirp_3".into() } }
+    fn default() -> Self { Self { api_key: String::new(), service_account_json: String::new(), project_id: String::new(), location: "us".into(), model: "chirp_3".into() } }
+}
+impl GoogleAsrConfig {
+    /// Project to bill: the explicit setting, else the `project_id` inside the service-account JSON.
+    pub fn resolved_project(&self) -> Option<String> {
+        let explicit = self.project_id.trim();
+        if !explicit.is_empty() {
+            return Some(explicit.to_string());
+        }
+        let json: serde_json::Value = serde_json::from_str(&self.service_account_json).ok()?;
+        json.get("project_id")?.as_str().map(str::to_string).filter(|p| !p.is_empty())
+    }
 }
 impl AsrConfig {
     pub fn ready(&self) -> bool {
@@ -685,7 +696,8 @@ impl AsrConfig {
             "mimo" => !self.mimo.api_key.trim().is_empty(),
             "cloudflare" => !self.cloudflare.api_key.trim().is_empty() && !self.cloudflare.account_id.trim().is_empty(),
             "azure" => !self.azure.api_key.trim().is_empty() && !self.azure.region.trim().is_empty(),
-            "google" => !self.google.project_id.trim().is_empty() && (!self.google.api_key.trim().is_empty() || !self.google.service_account_json.trim().is_empty()),
+            // Speech-to-Text v2 rejects API keys, so only a service account counts.
+            "google" => !self.google.service_account_json.trim().is_empty() && self.google.resolved_project().is_some(),
             _ => false,
         }
     }
