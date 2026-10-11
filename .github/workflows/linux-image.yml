@@ -1,0 +1,44 @@
+name: Linux build image
+
+# 构建 Linux 编译用的容器镜像（.github/docker/linux-build.Dockerfile），推送到 ghcr.io。
+# Dockerfile 改动时、每周一，或手动触发时重建（拿到系统安全更新与最新 stable Rust）。
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/docker/linux-build.Dockerfile"
+      - ".github/workflows/linux-image.yml"
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    # 在自建 runner 上构建：镜像留在本机 Docker 里，Linux 编译任务拉取时几乎不用下载。
+    runs-on: ${{ fromJSON(vars.LINUX_RUNS_ON || '["self-hosted","linux","x64","hyt-hk","ci"]') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image name
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/hoshiro-linux-build" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .github/docker
+          file: .github/docker/linux-build.Dockerfile
+          push: true
+          pull: true
+          tags: |
+            ${{ steps.name.outputs.image }}:22.04
+            ${{ steps.name.outputs.image }}:22.04-${{ github.run_number }}
