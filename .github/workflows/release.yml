@@ -1,6 +1,6 @@
 name: Release
 
-# 推送 v* 标签（如 v0.1.1）时编译 macOS（Apple 芯片 + Intel）与 Windows（x64），签名更新包，发布正式版并附上 latest.json 供应用内自动更新。
+# 推送 v* 标签（如 v0.1.1）时编译 macOS（Apple 芯片 + Intel）、Windows（x64）与 Linux（x64），签名更新包，发布正式版并附上 latest.json 供应用内自动更新。
 # 需要仓库 secrets：TAURI_SIGNING_PRIVATE_KEY（更新包签名）、MACOS_CERT_P12 / MACOS_CERT_PASSWORD（代码签名证书）。
 on:
   push:
@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: write
+  packages: read
 
 jobs:
   build:
@@ -76,6 +77,7 @@ jobs:
             | Apple 芯片（M 系列） | `aarch64.dmg` |
             | Intel | `x64.dmg` |
             | Windows 10/11 (x64) | `x64-setup.exe` |
+            | Linux (x64) | `amd64.deb`（Debian / Ubuntu）、`x86_64.rpm`（Fedora / openSUSE）、`amd64.AppImage`（其他发行版） |
 
             已安装旧版本的用户会通过应用内更新自动收到。安装包没有经过 Apple 公证，首次打开如果提示“已损坏”，在终端执行 `xattr -cr /Applications/Hoshiro.app`。
           releaseDraft: true # 两个架构都通过签名检查后，由 publish 任务转为正式版
@@ -125,9 +127,53 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
 
+  linux:
+    name: linux-x64
+    # 自建 runner（labels: self-hosted, linux, x64, hyt-hk, release，即 hyt-hk-release）。仓库变量 LINUX_RUNS_ON 设成 JSON 字符串 "ubuntu-latest"（含引号）可临时改回 GitHub 托管机器。
+    runs-on: ${{ fromJSON(vars.LINUX_RUNS_ON || '["self-hosted","linux","x64","hyt-hk","release"]') }}
+    # 在预装依赖的 Ubuntu 22.04 镜像里编译（见 linux-image.yml）：链接 glibc 2.35，产物能在 22.04 及更新的发行版上运行。
+    # cargo 下载缓存与 target 目录放在宿主机 /opt/hoshiro-ci，跨次构建保留，只做增量编译。
+    container:
+      image: ghcr.io/icyblue17/hoshiro-linux-build:22.04
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      volumes:
+        - /opt/hoshiro-ci/cargo-registry:/usr/local/cargo/registry
+        - /opt/hoshiro-ci/cargo-git:/usr/local/cargo/git
+        - /opt/hoshiro-ci/release:/ci-cache
+    env:
+      CARGO_TARGET_DIR: /ci-cache/target
+      BUN_INSTALL_CACHE_DIR: /ci-cache/bun
+      XDG_CACHE_HOME: /ci-cache/xdg # Tauri 下载的 linuxdeploy / AppRun 也留在本机
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: bun install --frozen-lockfile
+
+      # release profile：依赖与随后的打包共用同一份编译结果，不用再编一遍 debug 版
+      - run: cargo test --release --lib --manifest-path src-tauri/Cargo.toml
+
+      # 上一次构建留下的安装包（可能是旧版本号）不能混进这次的产物
+      - run: rm -rf "$CARGO_TARGET_DIR/release/bundle"
+
+      # deb / rpm / AppImage + 签名的更新包（AppImage 与 deb / rpm 各自的更新包都写进同一个 latest.json）。
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --bundles deb,rpm,appimage
+          tagName: ${{ github.ref_name }}
+          releaseName: Hoshiro ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+
   publish:
-    needs: [build, windows]
-    runs-on: ubuntu-latest
+    needs: [build, windows, linux]
+    runs-on: ${{ fromJSON(vars.LINUX_RUNS_ON || '["self-hosted","linux","x64","hyt-hk","release"]') }}
     steps:
       - name: Publish release
         env:
