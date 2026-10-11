@@ -2,10 +2,10 @@
 
 Hoshiro 提供四种输入模式，默认围绕 <Kbd size="sm">fn</Kbd> 键及组合键展开。
 
-::: tip Windows 默认按键
-PC 键盘的 Fn 不经过系统，Windows 上由 <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">Win</Kbd> 承担 fn 的角色；下文中的 ⌘ 对应 Win 键，⌥ 对应 Alt。
+::: tip Windows / Linux 默认按键
+PC 键盘的 Fn 不经过系统，Windows 和 Linux 上由 <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">Win</Kbd>（Linux 上叫 Super）承担 fn 的角色；下文中的 ⌘ 对应 Win / Super 键，⌥ 对应 Alt。
 
-| 功能 | macOS | Windows |
+| 功能 | macOS | Windows / Linux |
 |---|---|---|
 | 口述 / 免提 | <Kbd size="sm">fn</Kbd> | <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">Win</Kbd> |
 | 翻译 | <Kbd size="sm">fn</Kbd> + <Kbd size="sm">Left Shift</Kbd> | <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">Win</Kbd> + <Kbd size="sm">Left Shift</Kbd> |
@@ -74,12 +74,12 @@ PC 键盘的 Fn 不经过系统，Windows 上由 <Kbd size="sm">Ctrl</Kbd> + <Kb
 
 ## 重新粘贴
 
-快捷键 <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">⌘</Kbd> + <Kbd size="sm">V</Kbd>（Windows：<Kbd size="sm">Alt</Kbd> + <Kbd size="sm">Shift</Kbd> + <Kbd size="sm">V</Kbd>）：重新粘贴上一条处理后的文本。若因输入框失焦导致未能直接插入，可通过此快捷键直接补贴。
+快捷键 <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">⌘</Kbd> + <Kbd size="sm">V</Kbd>（Windows / Linux：<Kbd size="sm">Alt</Kbd> + <Kbd size="sm">Shift</Kbd> + <Kbd size="sm">V</Kbd>）：重新粘贴上一条处理后的文本。若因输入框失焦导致未能直接插入，可通过此快捷键直接补贴。
 
 ## 自定义快捷键
 
 在「设置 › 快捷键」中进行配置。每项功能均支持绑定多个按键，并支持：
 
-- 独立修饰键：如单独 <Kbd size="sm">fn</Kbd>、右 <Kbd size="sm">⌥ Option</Kbd>、右 <Kbd size="sm">⌘</Kbd>；Windows 上如右 <Kbd size="sm">Alt</Kbd>、<Kbd size="sm">Caps Lock</Kbd>
+- 独立修饰键：如单独 <Kbd size="sm">fn</Kbd>、右 <Kbd size="sm">⌥ Option</Kbd>、右 <Kbd size="sm">⌘</Kbd>；Windows / Linux 上如右 <Kbd size="sm">Alt</Kbd>、<Kbd size="sm">Caps Lock</Kbd>
 - 组合键：如 <Kbd size="sm">⌃</Kbd> + <Kbd size="sm">⌥</Kbd> + <Kbd size="sm">Space</Kbd>
 - 鼠标功能侧键
