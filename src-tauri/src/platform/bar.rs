@@ -1,4 +1,4 @@
-//! Floating bar window plumbing.
+//! Floating bar window plumbing (macOS: NSPanel below; Windows: `bar_win.rs`).
 //! The "bar" webview window (label "bar", 560x460, transparent) is created from tauri.conf.json.
 //! This module turns it into a non-activating, all-spaces, above-everything panel, positions it at the
 //! bottom-center of the screen that contains the mouse / key window, and implements click-through for
@@ -21,7 +21,11 @@ pub fn setup(app: &AppHandle) -> anyhow::Result<()> {
     {
         mac_impl::setup(app)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        win_impl::setup(app)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = app;
         Ok(())
@@ -32,7 +36,9 @@ pub fn setup(app: &AppHandle) -> anyhow::Result<()> {
 pub fn show(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     mac_impl::show(app);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    win_impl::show(app);
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = app;
 }
 
@@ -40,7 +46,9 @@ pub fn show(app: &AppHandle) {
 pub fn hide(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     mac_impl::hide(app);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    win_impl::hide(app);
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = app;
 }
 
@@ -48,12 +56,14 @@ pub fn hide(app: &AppHandle) {
 pub fn set_hit_rects(app: &AppHandle, rects: Vec<HitRect>) {
     #[cfg(target_os = "macos")]
     mac_impl::set_hit_rects(app, rects);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    win_impl::set_hit_rects(app, rects);
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = (app, rects);
 }
 
 /// Pure hit test: is the point (window coordinates, origin top-left) inside any rect (with a small slop)?
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 pub(crate) fn point_in_rects(x: f64, y: f64, rects: &[HitRect], slop: f64) -> bool {
     rects
         .iter()
@@ -67,6 +77,10 @@ pub(crate) fn bottom_center_origin(visible: (f64, f64, f64, f64), win_w: f64, ga
     let (vx, vy, vw, _vh) = visible;
     (vx + (vw - win_w) / 2.0, vy + gap)
 }
+
+#[cfg(windows)]
+#[path = "bar_win.rs"]
+mod win_impl;
 
 #[cfg(target_os = "macos")]
 mod mac_impl {

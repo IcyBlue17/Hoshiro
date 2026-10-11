@@ -17,6 +17,21 @@ pub fn typeless_dir() -> Option<PathBuf> {
 }
 
 pub fn typeless_installed() -> bool {
+    if cfg!(windows) {
+        // Per-user installer (%LOCALAPPDATA%\Programs) or machine-wide (Program Files).
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(local) = dirs::data_local_dir() {
+            candidates.push(local.join("Programs").join("Typeless").join("Typeless.exe"));
+            candidates.push(local.join("Programs").join("typeless").join("Typeless.exe"));
+            candidates.push(local.join("Typeless").join("Typeless.exe"));
+        }
+        for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+            if let Some(dir) = std::env::var_os(var) {
+                candidates.push(PathBuf::from(dir).join("Typeless").join("Typeless.exe"));
+            }
+        }
+        return candidates.iter().any(|p| p.exists());
+    }
     if Path::new("/Applications/Typeless.app").exists() {
         return true;
     }
@@ -28,7 +43,7 @@ pub fn typeless_installed() -> bool {
 const KEY_NAMES: &[&str] = &[
     "Fn", "Help", "Esc", "Space", "Tab", "Enter", "Backspace", "LeftShift", "RightShift", "Shift", "LeftCtrl",
     "RightCtrl", "Ctrl", "LeftOption", "RightOption", "Option", "LeftCmd", "RightCmd", "Cmd", "Up", "Down", "Left",
-    "Right", "Mouse3", "Mouse4", "Mouse5",
+    "Right", "Mouse3", "Mouse4", "Mouse5", "CapsLock", "Menu",
 ];
 
 /// Map a Typeless key name to ours (best effort). None = unknown key.
@@ -60,6 +75,12 @@ pub fn normalize_key_name(name: &str) -> Option<String> {
         "arrowleft" => "Left",
         "arrowright" => "Right",
         "globe" | "function" => "Fn",
+        "insert" | "ins" => "Help",
+        "leftwin" | "lwin" | "leftwindows" | "osleft" => "LeftCmd",
+        "rightwin" | "rwin" | "rightwindows" | "osright" => "RightCmd",
+        "altgr" | "altgraph" => "RightOption",
+        "caps" => "CapsLock",
+        "contextmenu" | "apps" => "Menu",
         _ => "",
     };
     if !mapped.is_empty() {
@@ -74,7 +95,7 @@ pub fn normalize_key_name(name: &str) -> Option<String> {
         }
     }
     if let Some(num) = lower.strip_prefix('f').and_then(|r| r.parse::<u8>().ok()) {
-        if (1..=20).contains(&num) {
+        if (1..=24).contains(&num) {
             return Some(format!("F{num}"));
         }
     }
@@ -160,6 +181,9 @@ pub fn map_settings(v: &Value, base: &Settings) -> (Settings, Vec<String>) {
         }
         if let Some(x) = map_bindings(b.get("pasteLastTranscript"), "粘贴上一次转录", &mut messages) {
             s.shortcuts.paste_last_transcript = x;
+        }
+        if cfg!(windows) && crate::config::drop_fn_bindings(&mut s.shortcuts) {
+            messages.push("Windows 键盘没有 Fn 键，含 Fn 的快捷键已换成 Windows 默认快捷键".into());
         }
     }
 
@@ -493,10 +517,19 @@ mod tests {
         base.asr.mimo.api_key = "keep-me".into();
         base.show_in_dock = false;
         let (s, msgs) = map_settings(&fixture(), &base);
-        assert!(msgs.is_empty());
-        assert_eq!(s.shortcuts.dictation, vec!["Fn", "Help", "RightOption"]);
-        assert_eq!(s.shortcuts.ask_anything, vec!["Fn+Space"]);
-        assert_eq!(s.shortcuts.translation, vec!["Fn+LeftShift"]);
+        if cfg!(windows) {
+            // No Fn key on PCs: Fn bindings are dropped, emptied lists get the Windows defaults.
+            let w = ShortcutBindings::windows_defaults();
+            assert_eq!(msgs.len(), 1);
+            assert_eq!(s.shortcuts.dictation, vec!["Help", "RightOption"]);
+            assert_eq!(s.shortcuts.ask_anything, w.ask_anything);
+            assert_eq!(s.shortcuts.translation, w.translation);
+        } else {
+            assert!(msgs.is_empty());
+            assert_eq!(s.shortcuts.dictation, vec!["Fn", "Help", "RightOption"]);
+            assert_eq!(s.shortcuts.ask_anything, vec!["Fn+Space"]);
+            assert_eq!(s.shortcuts.translation, vec!["Fn+LeftShift"]);
+        }
         assert_eq!(s.shortcuts.paste_last_transcript, vec!["Ctrl+Cmd+V"]);
         assert_eq!(s.selected_languages, vec!["zh-CN"]);
         assert!(!s.auto_select_languages);
@@ -536,6 +569,9 @@ mod tests {
     fn key_name_mapping() {
         assert_eq!(normalize_shortcut("fn+space").as_deref(), Some("Fn+Space"));
         assert_eq!(normalize_shortcut("Control+Command+v").as_deref(), Some("Ctrl+Cmd+V"));
+        assert_eq!(normalize_shortcut("Ctrl+Win").as_deref(), Some("Ctrl+Cmd"));
+        assert_eq!(normalize_shortcut("RightAlt").as_deref(), Some("RightOption"));
+        assert_eq!(normalize_shortcut("CapsLock").as_deref(), Some("CapsLock"));
         assert_eq!(normalize_shortcut("RightAlt").as_deref(), Some("RightOption"));
         assert_eq!(normalize_shortcut("KeyA").as_deref(), Some("A"));
         assert_eq!(normalize_shortcut("f13").as_deref(), Some("F13"));
@@ -546,9 +582,14 @@ mod tests {
     fn unknown_binding_is_reported_and_skipped() {
         let v = json!({"featureShortcutBindings": {"dictationMode": ["Fn", "Wat"], "askAnythingMode": []}});
         let (s, msgs) = map_settings(&v, &Settings::default());
-        assert_eq!(s.shortcuts.dictation, vec!["Fn"]);
+        if cfg!(windows) {
+            assert_eq!(s.shortcuts.dictation, ShortcutBindings::windows_defaults().dictation);
+            assert_eq!(msgs.len(), 2);
+        } else {
+            assert_eq!(s.shortcuts.dictation, vec!["Fn"]);
+            assert_eq!(msgs.len(), 1);
+        }
         assert!(s.shortcuts.ask_anything.is_empty());
-        assert_eq!(msgs.len(), 1);
     }
 
     #[test]

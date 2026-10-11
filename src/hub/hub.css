@@ -5,7 +5,7 @@ button:disabled { cursor: default; }
 input, textarea { font: inherit; color: inherit; }
 h1, h2, h3, p { margin: 0; }
 .muted { color: var(--text-2); }
-.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace; }
 .flex-spacer { flex: 1; }
 .hub-loading { height: 100vh; background: var(--bg-page); }
 
@@ -708,3 +708,15 @@ h1, h2, h3, p { margin: 0; }
 .update-bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.15s linear; }
 .update-bar i.indeterminate { width: 35%; animation: update-slide 1.2s ease-in-out infinite; }
 @keyframes update-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+
+/* Windows caption buttons (frameless hub window; see WindowControls.tsx) */
+.win-controls { position: fixed; top: 0; right: 0; z-index: 60; display: flex; height: 32px; }
+.win-btn {
+  width: 46px; height: 32px; border: 0; padding: 0; background: transparent; color: var(--text);
+  display: flex; align-items: center; justify-content: center; cursor: default; transition: background 0.1s;
+}
+.win-btn:hover { background: var(--bg-hover); }
+.win-btn:active { background: rgba(127, 127, 127, 0.26); }
+.win-btn.close:hover { background: #c42b1c; color: #fff; }
+.win-btn.close:active { background: #b3271a; color: #fff; }
+.win-glyph { font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets"; font-size: 10px; line-height: 1; }

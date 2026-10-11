@@ -7,6 +7,7 @@ import { type Page, useApp } from "./store";
 import { Modal, ModalHeader, ShortcutKeys } from "./ui";
 import type { LlmProvider } from "../lib/types";
 import { useUpdate } from "./update";
+import { DEFAULT_SHORTCUTS } from "./format";
 
 const NAV: { page: Page; label: string; icon: typeof House }[] = [
   { page: "home", label: "首页", icon: House },
@@ -110,10 +111,10 @@ export function Sidebar({ page }: { page: Page }) {
         <ModalHeader title="使用帮助" onClose={() => setHelp(false)} />
         <div className="help-list">
           {[
-            ["口述", settings.shortcuts.dictation[0] ?? "Fn", settings.shortcuts.trigger === "toggle" ? "按一下开始说话，再按一下结束并自动输入。" : "按住说话，松开后自动输入；双击进入免提模式。"],
-            ["随便问", settings.shortcuts.askAnything[0] ?? "Fn+Space", "对选中的文字下指令，或直接提问。"],
-            ["翻译", settings.shortcuts.translation[0] ?? "Fn+LeftShift", "把你说的话翻译成目标语言后输入。"],
-            ["粘贴上一次转录", settings.shortcuts.pasteLastTranscript[0] ?? "Ctrl+Cmd+V", "再次粘贴最近一次的结果。"],
+            ["口述", settings.shortcuts.dictation[0] ?? DEFAULT_SHORTCUTS.dictation[0], settings.shortcuts.trigger === "toggle" ? "按一下开始说话，再按一下结束并自动输入。" : "按住说话，松开后自动输入；双击进入免提模式。"],
+            ["随便问", settings.shortcuts.askAnything[0] ?? DEFAULT_SHORTCUTS.askAnything[0], "对选中的文字下指令，或直接提问。"],
+            ["翻译", settings.shortcuts.translation[0] ?? DEFAULT_SHORTCUTS.translation[0], "把你说的话翻译成目标语言后输入。"],
+            ["粘贴上一次转录", settings.shortcuts.pasteLastTranscript[0] ?? DEFAULT_SHORTCUTS.pasteLastTranscript[0], "再次粘贴最近一次的结果。"],
             ["取消", "Esc", "录音或处理过程中按下即可取消。"],
           ].map(([t, k, d]) => (
             <div className="help-row" key={t}>

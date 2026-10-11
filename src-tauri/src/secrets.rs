@@ -93,6 +93,35 @@ pub struct KeyringStore {
     service: String,
 }
 
+/// Windows Credential Manager caps one credential at 2560 bytes (1280 UTF-16 units) — less than a Google
+/// service-account JSON. Longer blobs are split over `credentials#1..N`, the main item holding a header.
+const CHUNK_UNITS: usize = if cfg!(windows) { 1200 } else { usize::MAX };
+const CHUNK_HEADER: &str = "hoshiro-chunks:v1:";
+
+/// Split `s` into pieces of at most `max` UTF-16 units, never inside a character.
+fn split_utf16(s: &str, max: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut units = 0;
+    for c in s.chars() {
+        let n = c.len_utf16();
+        if units + n > max && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+            units = 0;
+        }
+        cur.push(c);
+        units += n;
+    }
+    if !cur.is_empty() || out.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+fn chunk_count(main: &str) -> Option<usize> {
+    main.strip_prefix(CHUNK_HEADER)?.parse().ok()
+}
+
 impl KeyringStore {
     pub fn new(service: &str) -> Self {
         Self { service: service.to_string() }
@@ -101,23 +130,65 @@ impl KeyringStore {
         Self::new(SERVICE)
     }
     fn entry(&self) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(&self.service, ACCOUNT).map_err(|e| e.to_string())
+        self.entry_for(ACCOUNT)
     }
-}
-
-impl SecretStore for KeyringStore {
-    fn get(&self) -> Result<Option<String>, String> {
-        match self.entry()?.get_password() {
+    fn entry_for(&self, account: &str) -> Result<keyring::Entry, String> {
+        keyring::Entry::new(&self.service, account).map_err(|e| e.to_string())
+    }
+    fn chunk_entry(&self, i: usize) -> Result<keyring::Entry, String> {
+        self.entry_for(&format!("{ACCOUNT}#{i}"))
+    }
+    fn get_raw(e: &keyring::Entry) -> Result<Option<String>, String> {
+        match e.get_password() {
             Ok(v) => Ok(Some(v)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(e.to_string()),
         }
     }
+    /// Remove chunk items `from..=to` (best effort; a leftover chunk is never read without a header).
+    fn delete_chunks(&self, from: usize, to: usize) {
+        for i in from..=to {
+            if let Ok(e) = self.chunk_entry(i) {
+                let _ = e.delete_credential();
+            }
+        }
+    }
+}
+
+impl SecretStore for KeyringStore {
+    fn get(&self) -> Result<Option<String>, String> {
+        let Some(main) = Self::get_raw(&self.entry()?)? else { return Ok(None) };
+        let Some(n) = chunk_count(&main) else { return Ok(Some(main)) };
+        let mut blob = String::new();
+        for i in 1..=n {
+            match Self::get_raw(&self.chunk_entry(i)?)? {
+                Some(part) => blob.push_str(&part),
+                None => return Err(format!("credential chunk {i}/{n} is missing")),
+            }
+        }
+        Ok(Some(blob))
+    }
     fn set(&self, blob: &str) -> Result<(), String> {
-        self.entry()?.set_password(blob).map_err(|e| e.to_string())
+        let old = Self::get_raw(&self.entry()?).ok().flatten().as_deref().and_then(chunk_count).unwrap_or(0);
+        let parts = split_utf16(blob, CHUNK_UNITS);
+        if parts.len() == 1 {
+            self.entry()?.set_password(blob).map_err(|e| e.to_string())?;
+            self.delete_chunks(1, old);
+            return Ok(());
+        }
+        // Chunks first, header last: a reader never sees a header pointing at chunks not written yet.
+        for (i, part) in parts.iter().enumerate() {
+            self.chunk_entry(i + 1)?.set_password(part).map_err(|e| e.to_string())?;
+        }
+        self.entry()?.set_password(&format!("{CHUNK_HEADER}{}", parts.len())).map_err(|e| e.to_string())?;
+        self.delete_chunks(parts.len() + 1, old);
+        Ok(())
     }
     fn delete(&self) -> Result<(), String> {
-        self.entry()?.delete_credential().map_err(|e| e.to_string())
+        let old = Self::get_raw(&self.entry()?).ok().flatten().as_deref().and_then(chunk_count).unwrap_or(0);
+        self.entry()?.delete_credential().map_err(|e| e.to_string())?;
+        self.delete_chunks(1, old);
+        Ok(())
     }
 }
 
@@ -285,6 +356,34 @@ mod tests {
         s.asr.google.service_account_json = "{\"private_key\":\"SEKRET-sa\"}".into();
         s.llm.openai.api_key = "SEKRET-oai".into();
         s
+    }
+
+    #[test]
+    fn utf16_chunking() {
+        assert_eq!(split_utf16("", 4), vec![""]);
+        assert_eq!(split_utf16("abcdef", 4), vec!["abcd", "ef"]);
+        // 😀 is two UTF-16 units and must never be split.
+        assert_eq!(split_utf16("a😀😀", 2), vec!["a", "😀", "😀"]);
+        let long = "密钥".repeat(2000);
+        let parts = split_utf16(&long, 1200);
+        assert!(parts.iter().all(|p| p.encode_utf16().count() <= 1200));
+        assert_eq!(parts.concat(), long);
+        assert_eq!(chunk_count("hoshiro-chunks:v1:3"), Some(3));
+        assert_eq!(chunk_count("{\"a\":1}"), None);
+    }
+
+    /// Writes to the real OS credential store under a throwaway service name: run with `--ignored`.
+    #[test]
+    #[ignore = "touches the OS credential store"]
+    fn keyring_roundtrip_with_large_blob() {
+        let store = KeyringStore::new("cn.icybit.hoshiro.test");
+        let big = format!("{{\"sa\":\"{}\"}}", "k".repeat(6000));
+        store.set(&big).unwrap();
+        assert_eq!(store.get().unwrap().as_deref(), Some(big.as_str()));
+        store.set("{}").unwrap();
+        assert_eq!(store.get().unwrap().as_deref(), Some("{}"));
+        store.delete().unwrap();
+        assert_eq!(store.get().unwrap(), None);
     }
 
     #[test]

@@ -54,12 +54,35 @@ pub struct ShortcutBindings {
 
 impl Default for ShortcutBindings {
     fn default() -> Self {
+        if cfg!(windows) {
+            Self::windows_defaults()
+        } else {
+            Self::mac_defaults()
+        }
+    }
+}
+
+impl ShortcutBindings {
+    /// Typeless' macOS defaults: everything hangs off the Fn (🌐) key.
+    pub fn mac_defaults() -> Self {
         Self {
             trigger: TriggerMode::default(),
             dictation: vec!["Fn".into()],
             ask_anything: vec!["Fn+Space".into()],
             translation: vec!["Fn+LeftShift".into()],
             paste_last_transcript: vec!["Ctrl+Cmd+V".into()],
+        }
+    }
+
+    /// PCs never report Fn to the OS, so Ctrl+Win takes its role: hold to talk, add Space / Left Shift for
+    /// the other modes. (In key names, Cmd = the Windows key and Option = Alt.)
+    pub fn windows_defaults() -> Self {
+        Self {
+            trigger: TriggerMode::default(),
+            dictation: vec!["Ctrl+Cmd".into()],
+            ask_anything: vec!["Ctrl+Cmd+Space".into()],
+            translation: vec!["Ctrl+LeftShift+Cmd".into()],
+            paste_last_transcript: vec!["Option+Shift+V".into()],
         }
     }
 }

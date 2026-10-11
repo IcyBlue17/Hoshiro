@@ -115,6 +115,30 @@ fn merge(base: &mut Value, over: Value) {
     }
 }
 
+/// Windows never sees the Fn key, so a binding that needs it (macOS defaults, a Typeless import from a
+/// Mac) could never fire. Drop those; a list left empty gets the Windows default for that mode.
+/// Returns true if anything was replaced.
+pub(crate) fn drop_fn_bindings(b: &mut ShortcutBindings) -> bool {
+    let mut changed = false;
+    let defaults = ShortcutBindings::windows_defaults();
+    let uses_fn = |x: &String| x.split('+').any(|k| k.trim().eq_ignore_ascii_case("fn") || k.trim().eq_ignore_ascii_case("globe"));
+    for (list, default) in [
+        (&mut b.dictation, defaults.dictation),
+        (&mut b.ask_anything, defaults.ask_anything),
+        (&mut b.translation, defaults.translation),
+        (&mut b.paste_last_transcript, defaults.paste_last_transcript),
+    ] {
+        if list.iter().any(uses_fn) {
+            changed = true;
+            list.retain(|x| !uses_fn(x));
+            if list.is_empty() {
+                *list = default;
+            }
+        }
+    }
+    changed
+}
+
 pub fn sanitize(s: &mut Settings) {
     let d = Settings::default();
     let trim_all = |v: &mut Vec<String>| {
@@ -129,6 +153,9 @@ pub fn sanitize(s: &mut Settings) {
     trim_all(&mut s.shortcuts.ask_anything);
     trim_all(&mut s.shortcuts.translation);
     trim_all(&mut s.shortcuts.paste_last_transcript);
+    if cfg!(windows) {
+        drop_fn_bindings(&mut s.shortcuts);
+    }
     if s.shortcuts.dictation.is_empty() {
         s.shortcuts.dictation = ShortcutBindings::default().dictation;
     }
@@ -303,8 +330,25 @@ mod tests {
         let s = parse_settings(r#"{"launchAtLogin": false, "shortcuts": {"dictation": ["Help"]}}"#).unwrap();
         assert!(!s.launch_at_login);
         assert_eq!(s.shortcuts.dictation, vec!["Help".to_string()]);
-        assert_eq!(s.shortcuts.ask_anything, vec!["Fn+Space".to_string()]);
+        assert_eq!(s.shortcuts.ask_anything, ShortcutBindings::default().ask_anything);
         assert_eq!(s.llm.timeout_secs, 12);
+    }
+
+    #[test]
+    fn fn_bindings_are_replaced_on_windows_only() {
+        let mut b = ShortcutBindings::mac_defaults();
+        b.dictation.push("RightOption".into());
+        assert!(drop_fn_bindings(&mut b));
+        let w = ShortcutBindings::windows_defaults();
+        assert_eq!(b.dictation, vec!["RightOption".to_string()]);
+        assert_eq!(b.ask_anything, w.ask_anything);
+        assert_eq!(b.translation, w.translation);
+        assert_eq!(b.paste_last_transcript, vec!["Ctrl+Cmd+V".to_string()]);
+        for list in [&w.dictation, &w.ask_anything, &w.translation, &w.paste_last_transcript] {
+            for x in list {
+                assert_eq!(crate::platform::hotkey::normalize_binding(x).as_deref(), Some(x.as_str()), "{x} is not canonical");
+            }
+        }
     }
 
     #[test]
@@ -325,7 +369,7 @@ mod tests {
         s.asr.mimo.api_key = "  key\n".into();
         s.microphone_device_id = Some("default".into());
         sanitize(&mut s);
-        assert_eq!(s.shortcuts.dictation, vec!["Fn".to_string()]);
+        assert_eq!(s.shortcuts.dictation, ShortcutBindings::default().dictation);
         assert_eq!(s.history_retention, "1m");
         assert_eq!(s.translation_targets.len(), 3);
         assert_eq!(s.asr.mimo.api_key, "key");

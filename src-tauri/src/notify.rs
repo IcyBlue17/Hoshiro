@@ -113,8 +113,11 @@ pub fn first_binding_label(settings: &Settings) -> String {
     settings.shortcuts.dictation.first().map(|b| key_label(b)).unwrap_or_else(|| "fn".into())
 }
 
-/// Human label for a binding such as "Fn" -> "fn", "RightOption" -> "右 ⌥".
+/// Human label for a binding such as "Fn" -> "fn", "RightOption" -> "右 ⌥" (Windows: "Ctrl+Cmd" -> "Ctrl+Win").
 pub fn key_label(binding: &str) -> String {
+    if cfg!(windows) {
+        return windows_key_label(binding);
+    }
     binding
         .split('+')
         .map(|k| match k {
@@ -138,6 +141,34 @@ pub fn key_label(binding: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("")
+}
+
+/// Windows keyboards print words, not symbols: Option is Alt and Cmd is the Windows key.
+fn windows_key_label(binding: &str) -> String {
+    binding
+        .split('+')
+        .map(|k| {
+            let (side, base) = match k {
+                k if k.starts_with("Left") && k.len() > 4 => ("左 ", &k[4..]),
+                k if k.starts_with("Right") && k.len() > 5 => ("右 ", &k[5..]),
+                k => ("", k),
+            };
+            let base = match base {
+                "Option" => "Alt",
+                "Cmd" => "Win",
+                "Esc" => "Esc",
+                "Help" => "Insert",
+                "Space" => "Space",
+                b => b,
+            };
+            if matches!(base, "Alt" | "Win" | "Ctrl" | "Shift") {
+                format!("{side}{base}")
+            } else {
+                k.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("+")
 }
 
 pub fn idle_phase(settings: &Settings) -> BarPhase {

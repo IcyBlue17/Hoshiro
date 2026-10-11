@@ -3,13 +3,23 @@ import { Check } from "lucide-react";
 import { api } from "../../lib/ipc";
 import { EVENTS, type PermissionKind, type Permissions } from "../../lib/types";
 import { useBackendEvent, usePoll } from "../hooks";
+import { IS_WINDOWS } from "../../lib/platform";
 import { Row } from "./shared";
 
-export const PERMISSION_INFO: { kind: PermissionKind; title: string; desc: string }[] = [
-  { kind: "microphone", title: "麦克风", desc: "仅在您按下快捷键口述时才会使用麦克风录音。" },
-  { kind: "accessibility", title: "辅助功能", desc: "用于读取当前应用的上下文，并将文字粘贴到任何文本框中。" },
-  { kind: "inputMonitoring", title: "输入监控", desc: "用于识别 Fn 等全局快捷键。" },
-];
+// Windows has no Accessibility / Input Monitoring grants: global hooks and UI Automation need no consent.
+export const PERMISSION_INFO: { kind: PermissionKind; title: string; desc: string }[] = IS_WINDOWS
+  ? [
+      {
+        kind: "microphone",
+        title: "麦克风",
+        desc: "仅在您按下快捷键口述时才会使用麦克风录音。需要在 Windows 设置 › 隐私和安全性 › 麦克风中允许桌面应用访问。",
+      },
+    ]
+  : [
+      { kind: "microphone", title: "麦克风", desc: "仅在您按下快捷键口述时才会使用麦克风录音。" },
+      { kind: "accessibility", title: "辅助功能", desc: "用于读取当前应用的上下文，并将文字粘贴到任何文本框中。" },
+      { kind: "inputMonitoring", title: "输入监控", desc: "用于识别 Fn 等全局快捷键。" },
+    ];
 
 export function usePermissions(active = true) {
   const [perms, setPerms] = useState<Permissions | null>(null);
@@ -39,7 +49,7 @@ export function PermissionAction({
   if (state === "denied")
     return (
       <button className="btn btn-secondary btn-sm" onClick={() => api.openPermissionSettings(kind)}>
-        打开系统设置
+        {IS_WINDOWS ? "打开 Windows 设置" : "打开系统设置"}
       </button>
     );
   return (

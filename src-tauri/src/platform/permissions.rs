@@ -11,7 +11,16 @@ pub fn check() -> Permissions {
             input_monitoring: mac_impl::input_monitoring(),
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        // Hooks and UI Automation need no grant on Windows; only the microphone privacy switch matters.
+        Permissions {
+            microphone: win_impl::microphone(),
+            accessibility: PermissionState::Granted,
+            input_monitoring: PermissionState::Granted,
+        }
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         Permissions {
             microphone: PermissionState::Granted,
@@ -25,6 +34,7 @@ pub fn check() -> Permissions {
 /// with prompt; input monitoring: CGRequestListenEventAccess). Returns the updated state.
 ///
 /// The microphone prompt is asynchronous: the returned state may still be `NotDetermined`; poll `check()`.
+/// Windows has no consent prompt for desktop apps: a denied microphone opens the privacy settings page instead.
 pub fn request(kind: PermissionKind) -> Permissions {
     #[cfg(target_os = "macos")]
     {
@@ -34,7 +44,13 @@ pub fn request(kind: PermissionKind) -> Permissions {
             PermissionKind::InputMonitoring => mac_impl::request_input_monitoring(),
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        if kind == PermissionKind::Microphone && win_impl::microphone() == PermissionState::Denied {
+            open_settings(kind);
+        }
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = kind;
     }
@@ -42,6 +58,7 @@ pub fn request(kind: PermissionKind) -> Permissions {
 }
 
 /// URL of the System Settings pane for a permission.
+#[cfg(not(windows))]
 pub fn settings_url(kind: PermissionKind) -> &'static str {
     match kind {
         PermissionKind::Microphone => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
@@ -50,7 +67,19 @@ pub fn settings_url(kind: PermissionKind) -> &'static str {
     }
 }
 
+/// URL of the Settings page for a permission.
+#[cfg(windows)]
+pub fn settings_url(kind: PermissionKind) -> &'static str {
+    match kind {
+        PermissionKind::Microphone => "ms-settings:privacy-microphone",
+        PermissionKind::Accessibility | PermissionKind::InputMonitoring => "ms-settings:privacy",
+    }
+}
+
+#[cfg(not(windows))]
 const KEYBOARD_SETTINGS_URL: &str = "x-apple.systempreferences:com.apple.Keyboard-Settings.extension";
+#[cfg(windows)]
+const KEYBOARD_SETTINGS_URL: &str = "ms-settings:typing";
 
 /// Open the relevant System Settings pane.
 pub fn open_settings(kind: PermissionKind) {
@@ -69,37 +98,54 @@ fn open_url(url: &str) {
             log::warn!("failed to open {url}: {e}");
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        win_impl::open_url(url);
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = url;
     }
 }
 
-/// Is another app (e.g. Typeless) running? Returns pids for the bundle id.
+/// Is another app (e.g. Typeless) running? Returns pids for the bundle id (Windows: its executable).
 pub fn running_pids(bundle_id: &str) -> Vec<i32> {
     #[cfg(target_os = "macos")]
     {
         mac_impl::running_pids(bundle_id)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        win_impl::running_pids(bundle_id)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = bundle_id;
         vec![]
     }
 }
 
-/// Politely terminate apps with this bundle id (NSRunningApplication.terminate).
+/// Politely terminate apps with this bundle id (NSRunningApplication.terminate; Windows: WM_CLOSE, then end
+/// whatever is left after a grace period).
 pub fn terminate_app(bundle_id: &str) -> bool {
     #[cfg(target_os = "macos")]
     {
         mac_impl::terminate_app(bundle_id)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        win_impl::terminate_app(bundle_id)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = bundle_id;
         false
     }
 }
+
+#[cfg(windows)]
+#[path = "permissions_win.rs"]
+mod win_impl;
 
 #[cfg(target_os = "macos")]
 mod mac_impl {
@@ -215,11 +261,21 @@ mod mac_impl {
 mod tests {
     use super::*;
 
+    #[cfg(not(windows))]
     #[test]
     fn settings_urls() {
         assert!(settings_url(PermissionKind::Microphone).ends_with("Privacy_Microphone"));
         assert!(settings_url(PermissionKind::Accessibility).ends_with("Privacy_Accessibility"));
         assert!(settings_url(PermissionKind::InputMonitoring).ends_with("Privacy_ListenEvent"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_settings_urls() {
+        assert_eq!(settings_url(PermissionKind::Microphone), "ms-settings:privacy-microphone");
+        let p = check();
+        assert_eq!(p.accessibility, PermissionState::Granted);
+        assert_eq!(p.input_monitoring, PermissionState::Granted);
     }
 
     #[cfg(target_os = "macos")]

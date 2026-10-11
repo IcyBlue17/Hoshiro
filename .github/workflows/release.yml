@@ -1,6 +1,6 @@
 name: Release
 
-# 推送 v* 标签（如 v0.1.1）时编译 macOS（Apple 芯片 + Intel），签名更新包，发布正式版并附上 latest.json 供应用内自动更新。
+# 推送 v* 标签（如 v0.1.1）时编译 macOS（Apple 芯片 + Intel）与 Windows（x64），签名更新包，发布正式版并附上 latest.json 供应用内自动更新。
 # 需要仓库 secrets：TAURI_SIGNING_PRIVATE_KEY（更新包签名）、MACOS_CERT_P12 / MACOS_CERT_PASSWORD（代码签名证书）。
 on:
   push:
@@ -75,6 +75,7 @@ jobs:
             |---|---|
             | Apple 芯片（M 系列） | `aarch64.dmg` |
             | Intel | `x64.dmg` |
+            | Windows 10/11 (x64) | `x64-setup.exe` |
 
             已安装旧版本的用户会通过应用内更新自动收到。安装包没有经过 Apple 公证，首次打开如果提示“已损坏”，在终端执行 `xattr -cr /Applications/Hoshiro.app`。
           releaseDraft: true # 两个架构都通过签名检查后，由 publish 任务转为正式版
@@ -90,8 +91,42 @@ jobs:
           if ! echo "$req" | grep -q 'certificate' || echo "$req" | grep -q 'cdhash'; then echo "::error::app 不是用证书签名的（可能退回了 ad-hoc）"; exit 1; fi
           codesign --verify --deep --strict "$app"
 
+  windows:
+    name: windows-x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: x86_64-pc-windows-msvc
+
+      - run: bun install --frozen-lockfile
+
+      # 单元测试在 Windows 上跑一遍（含 Windows 平台层的纯逻辑测试）
+      - run: cargo test --lib --manifest-path src-tauri/Cargo.toml
+
+      # NSIS 安装包 + 签名的更新包；tauri-action 会把 windows-x86_64 合并进同一个 latest.json。
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --bundles nsis
+          tagName: ${{ github.ref_name }}
+          releaseName: Hoshiro ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+
   publish:
-    needs: build
+    needs: [build, windows]
     runs-on: ubuntu-latest
     steps:
       - name: Publish release

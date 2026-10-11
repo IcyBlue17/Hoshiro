@@ -2,7 +2,12 @@
 :root { color-scheme: light dark; }
 html, body, #root { margin: 0; padding: 0; height: 100%; }
 html.window-bar, html.window-bar body { background: transparent !important; overflow: hidden; }
-* { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; }
+* {
+  box-sizing: border-box;
+  /* macOS: SF + PingFang; Windows: Segoe UI Variable + Microsoft YaHei UI (the system UI fonts). */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI",
+    "Microsoft YaHei", "Helvetica Neue", sans-serif;
+}
 
 /* ───────── Dark (default) — approximates Typeless dark mode ───────── */
 :root,

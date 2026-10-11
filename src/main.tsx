@@ -1,9 +1,11 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { currentWindowLabel } from "./lib/ipc";
+import { PLATFORM } from "./lib/platform";
 import "./styles/tokens.css";
 
 const label = currentWindowLabel();
+document.documentElement.dataset.platform = PLATFORM;
 
 async function boot() {
   const root = ReactDOM.createRoot(document.getElementById("root")!);

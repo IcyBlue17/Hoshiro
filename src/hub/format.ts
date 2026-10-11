@@ -1,11 +1,40 @@
 import type { HistoryRetention, Shortcut, ShortcutBindings, TriggerMode } from "../lib/types";
+import { IS_WINDOWS } from "../lib/platform";
 
-export const DEFAULT_SHORTCUTS: ShortcutBindings = {
-  trigger: "hold",
-  dictation: ["Fn"],
-  askAnything: ["Fn+Space"],
-  translation: ["Fn+LeftShift"],
-  pasteLastTranscript: ["Ctrl+Cmd+V"],
+/** Mirrors `ShortcutBindings::{mac,windows}_defaults` in Rust. Key names are shared: Option = Alt, Cmd = Win. */
+export const DEFAULT_SHORTCUTS: ShortcutBindings = IS_WINDOWS
+  ? {
+      trigger: "hold",
+      dictation: ["Ctrl+Cmd"],
+      askAnything: ["Ctrl+Cmd+Space"],
+      translation: ["Ctrl+LeftShift+Cmd"],
+      pasteLastTranscript: ["Option+Shift+V"],
+    }
+  : {
+      trigger: "hold",
+      dictation: ["Fn"],
+      askAnything: ["Fn+Space"],
+      translation: ["Fn+LeftShift"],
+      pasteLastTranscript: ["Ctrl+Cmd+V"],
+    };
+
+/** Windows keyboards print words: Option is Alt, Cmd is the Windows key, Help sits where Insert is. */
+const WINDOWS_KEY_LABELS: Record<string, string> = {
+  Help: "Insert",
+  Backspace: "Backspace",
+  LeftCtrl: "Left Ctrl",
+  RightCtrl: "Right Ctrl",
+  Ctrl: "Ctrl",
+  LeftOption: "Left Alt",
+  RightOption: "Right Alt",
+  Option: "Alt",
+  LeftCmd: "Left Win",
+  RightCmd: "Right Win",
+  Cmd: "Win",
+  CapsLock: "Caps Lock",
+  Menu: "Menu",
+  PrintScreen: "PrtSc",
+  NumEnter: "Num Enter",
 };
 
 const KEY_LABELS: Record<string, string> = {
@@ -38,7 +67,13 @@ const KEY_LABELS: Record<string, string> = {
 };
 
 export function prettyKey(key: string): string {
+  if (IS_WINDOWS && key in WINDOWS_KEY_LABELS) return WINDOWS_KEY_LABELS[key];
   return KEY_LABELS[key] ?? key;
+}
+
+/** Short, inline name of the first dictation key, e.g. "Fn" or "Ctrl + Win" (for running text). */
+export function dictationKeyText(b: ShortcutBindings): string {
+  return shortcutLabel(b.dictation[0] ?? DEFAULT_SHORTCUTS.dictation[0]);
 }
 
 export function splitShortcut(s: Shortcut): string[] {
@@ -58,7 +93,15 @@ export function normalizedCombo(s: Shortcut): string {
   return splitShortcut(s).map(normalizeKey).sort().join("+");
 }
 
-const RESERVED = ["Cmd+Q", "Cmd+Tab", "Cmd+Space", "Cmd+W", "Cmd+H", "Cmd+M"].map(normalizedCombo);
+const RESERVED = (
+  IS_WINDOWS
+    ? [
+        "Option+Tab", "Option+F4", "Option+Esc", "Ctrl+Esc", "Ctrl+Shift+Esc", "Ctrl+Option+Delete", "Cmd+L",
+        "Cmd+D", "Cmd+E", "Cmd+R", "Cmd+Tab", "Cmd+V", "Cmd+I", "Cmd+X", "Cmd+Space", "Cmd+Shift+S", "Cmd+.",
+        "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+A", "Ctrl+S",
+      ]
+    : ["Cmd+Q", "Cmd+Tab", "Cmd+Space", "Cmd+W", "Cmd+H", "Cmd+M"]
+).map(normalizedCombo);
 
 export type ShortcutError = "tooManyKeys" | "alphanumericOnly" | "systemReserved" | "alreadyInUse";
 

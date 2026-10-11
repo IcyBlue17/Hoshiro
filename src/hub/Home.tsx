@@ -9,6 +9,7 @@ import { useApp } from "./store";
 import { ShortcutKeys } from "./ui";
 import { Heatmap } from "./Heatmap";
 import { updateLabel, useUpdate } from "./update";
+import { IS_WINDOWS } from "../lib/platform";
 
 export function BigNumber({ parts }: { parts: { value: string | number; unit: string }[] }) {
   return (
@@ -87,7 +88,7 @@ export function Home() {
           {typeless?.running && (
             <motion.div className="banner warn" {...stagger(0)}>
               <AlertTriangle size={18} />
-              <span className="banner-text">Typeless 正在运行，会与 Hoshiro 抢占 Fn 键</span>
+              <span className="banner-text">Typeless 正在运行，会与 Hoshiro 抢占{IS_WINDOWS ? "快捷键" : " Fn 键"}</span>
               <button className="btn btn-sm btn-secondary" onClick={quit} disabled={quitting}>
                 {quitting ? "正在退出…" : "退出 Typeless"}
               </button>

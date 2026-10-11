@@ -18,8 +18,48 @@ const ASSUMED_PHASE_GRACE_MS: u64 = 400;
 
 // ───────────────────────── key tables ─────────────────────────
 
+/// Virtual keycode -> canonical key name for the current OS.
+///
+/// Key names are shared by every OS (settings files, Typeless imports and the UI all use them): the
+/// "Option" family is Alt on Windows and the "Cmd" family is the Windows key. `Fn` is handled by the
+/// keyboard firmware on PCs and never reaches Windows, so it only exists in the macOS table.
+#[cfg(not(windows))]
+const KEYS: &[(u16, KeyName)] = MAC_KEYS;
+#[cfg(windows)]
+const KEYS: &[(u16, KeyName)] = WIN_KEYS;
+
+/// Pseudo virtual key for the numpad Enter (VK_RETURN with the extended flag) on Windows.
+pub const VK_NUMPAD_ENTER: u16 = 0x10D;
+
+/// Win32 virtual key -> canonical key name.
+#[cfg_attr(not(windows), allow(dead_code))]
+const WIN_KEYS: &[(u16, KeyName)] = &[
+    (0x41, "A"), (0x42, "B"), (0x43, "C"), (0x44, "D"), (0x45, "E"), (0x46, "F"), (0x47, "G"), (0x48, "H"),
+    (0x49, "I"), (0x4A, "J"), (0x4B, "K"), (0x4C, "L"), (0x4D, "M"), (0x4E, "N"), (0x4F, "O"), (0x50, "P"),
+    (0x51, "Q"), (0x52, "R"), (0x53, "S"), (0x54, "T"), (0x55, "U"), (0x56, "V"), (0x57, "W"), (0x58, "X"),
+    (0x59, "Y"), (0x5A, "Z"),
+    (0x30, "0"), (0x31, "1"), (0x32, "2"), (0x33, "3"), (0x34, "4"), (0x35, "5"), (0x36, "6"), (0x37, "7"),
+    (0x38, "8"), (0x39, "9"),
+    (0x70, "F1"), (0x71, "F2"), (0x72, "F3"), (0x73, "F4"), (0x74, "F5"), (0x75, "F6"), (0x76, "F7"),
+    (0x77, "F8"), (0x78, "F9"), (0x79, "F10"), (0x7A, "F11"), (0x7B, "F12"), (0x7C, "F13"), (0x7D, "F14"),
+    (0x7E, "F15"), (0x7F, "F16"), (0x80, "F17"), (0x81, "F18"), (0x82, "F19"), (0x83, "F20"), (0x84, "F21"),
+    (0x85, "F22"), (0x86, "F23"), (0x87, "F24"),
+    (0x25, "Left"), (0x27, "Right"), (0x28, "Down"), (0x26, "Up"),
+    (0x20, "Space"), (0x1B, "Esc"), (0x0D, "Enter"), (0x09, "Tab"), (0x08, "Backspace"), (0x2E, "Delete"),
+    (0x24, "Home"), (0x23, "End"), (0x21, "PageUp"), (0x22, "PageDown"), (0x2D, "Help"),
+    (0x14, "CapsLock"), (0x5D, "Menu"), (0x2C, "PrintScreen"), (0x91, "ScrollLock"), (0x13, "Pause"),
+    (0xBD, "-"), (0xBB, "="), (0xDB, "["), (0xDD, "]"), (0xDC, "\\"), (0xBA, ";"), (0xDE, "'"), (0xBC, ","),
+    (0xBE, "."), (0xBF, "/"), (0xC0, "`"),
+    (0x60, "Num0"), (0x61, "Num1"), (0x62, "Num2"), (0x63, "Num3"), (0x64, "Num4"), (0x65, "Num5"),
+    (0x66, "Num6"), (0x67, "Num7"), (0x68, "Num8"), (0x69, "Num9"), (VK_NUMPAD_ENTER, "NumEnter"),
+    // modifiers
+    (0xA0, "LeftShift"), (0xA1, "RightShift"), (0xA2, "LeftCtrl"), (0xA3, "RightCtrl"),
+    (0xA4, "LeftOption"), (0xA5, "RightOption"), (0x5B, "LeftCmd"), (0x5C, "RightCmd"),
+];
+
 /// macOS virtual keycode -> canonical key name.
-const KEYS: &[(u16, KeyName)] = &[
+#[cfg_attr(windows, allow(dead_code))]
+const MAC_KEYS: &[(u16, KeyName)] = &[
     (0, "A"), (11, "B"), (8, "C"), (2, "D"), (14, "E"), (3, "F"), (5, "G"), (4, "H"), (34, "I"),
     (38, "J"), (40, "K"), (37, "L"), (46, "M"), (45, "N"), (31, "O"), (35, "P"), (12, "Q"),
     (15, "R"), (1, "S"), (17, "T"), (32, "U"), (9, "V"), (13, "W"), (7, "X"), (16, "Y"), (6, "Z"),
@@ -40,7 +80,7 @@ const KEYS: &[(u16, KeyName)] = &[
     (58, "LeftOption"), (61, "RightOption"), (55, "LeftCmd"), (54, "RightCmd"),
 ];
 
-/// CGEvent mouse button number (0-based) -> name. Buttons 0/1 (left/right) are never tapped.
+/// Mouse button number (0-based: 2 = middle, 3/4 = side buttons) -> name. Buttons 0/1 (left/right) are never tapped.
 const MOUSE: &[(i64, KeyName)] = &[(2, "Mouse3"), (3, "Mouse4"), (4, "Mouse5")];
 
 pub fn key_for_code(code: u16) -> Option<KeyName> {
@@ -55,6 +95,7 @@ pub fn mouse_button_name(button: i64) -> Option<KeyName> {
     MOUSE.iter().find(|(b, _)| *b == button).map(|(_, n)| *n)
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 pub fn mouse_button_number(name: &str) -> Option<i64> {
     MOUSE.iter().find(|(_, n)| *n == name).map(|(b, _)| *b)
 }
@@ -101,22 +142,37 @@ pub fn is_modifier(name: &str) -> bool {
 }
 
 // CGEventFlags device-independent masks.
+#[cfg_attr(windows, allow(dead_code))]
 pub const FLAG_SHIFT: u64 = 0x0002_0000;
+#[cfg_attr(windows, allow(dead_code))]
 pub const FLAG_CTRL: u64 = 0x0004_0000;
+#[cfg_attr(windows, allow(dead_code))]
 pub const FLAG_OPTION: u64 = 0x0008_0000;
+#[cfg_attr(windows, allow(dead_code))]
 pub const FLAG_CMD: u64 = 0x0010_0000;
+#[cfg_attr(windows, allow(dead_code))]
 pub const FLAG_FN: u64 = 0x0080_0000;
 // Device-dependent (NX_DEVICE*) bits.
+#[cfg_attr(windows, allow(dead_code))]
 const DEV_LCTRL: u64 = 0x0001;
+#[cfg_attr(windows, allow(dead_code))]
 const DEV_LSHIFT: u64 = 0x0002;
+#[cfg_attr(windows, allow(dead_code))]
 const DEV_RSHIFT: u64 = 0x0004;
+#[cfg_attr(windows, allow(dead_code))]
 const DEV_LCMD: u64 = 0x0008;
+#[cfg_attr(windows, allow(dead_code))]
 const DEV_RCMD: u64 = 0x0010;
+#[cfg_attr(windows, allow(dead_code))]
 const DEV_LOPT: u64 = 0x0020;
+#[cfg_attr(windows, allow(dead_code))]
 const DEV_ROPT: u64 = 0x0040;
+#[cfg_attr(windows, allow(dead_code))]
 const DEV_RCTRL: u64 = 0x2000;
+#[cfg_attr(windows, allow(dead_code))]
 const DEV_ALL: u64 = DEV_LCTRL | DEV_LSHIFT | DEV_RSHIFT | DEV_LCMD | DEV_RCMD | DEV_LOPT | DEV_ROPT | DEV_RCTRL;
 
+#[cfg_attr(windows, allow(dead_code))]
 pub fn family_flag(f: Family) -> u64 {
     match f {
         Family::Fn => FLAG_FN,
@@ -129,6 +185,7 @@ pub fn family_flag(f: Family) -> u64 {
 
 /// Interpret a `flagsChanged` event: which modifier key moved and whether it went down.
 /// Returns None for keycodes that are not tracked modifiers (e.g. Caps Lock).
+#[cfg_attr(windows, allow(dead_code))]
 pub fn modifier_transition(keycode: u16, flags: u64) -> Option<(KeyName, bool)> {
     let (name, device, generic) = match keycode {
         63 => ("Fn", 0, FLAG_FN),
@@ -183,7 +240,7 @@ fn lookup_key_token(token: &str) -> Option<KeySpec> {
         "ctrl" | "control" => Some(Family::Ctrl),
         "option" | "opt" | "alt" => Some(Family::Option),
         "shift" => Some(Family::Shift),
-        "cmd" | "command" | "meta" | "super" => Some(Family::Cmd),
+        "cmd" | "command" | "meta" | "super" | "win" | "windows" => Some(Family::Cmd),
         _ => None,
     };
     if let Some(f) = generic {
@@ -193,11 +250,14 @@ fn lookup_key_token(token: &str) -> Option<KeySpec> {
         "leftctrl" | "leftcontrol" | "lctrl" => "LeftCtrl",
         "rightctrl" | "rightcontrol" | "rctrl" => "RightCtrl",
         "leftoption" | "leftalt" | "loption" | "lalt" => "LeftOption",
-        "rightoption" | "rightalt" | "roption" | "ralt" => "RightOption",
+        "rightoption" | "rightalt" | "roption" | "ralt" | "altgr" => "RightOption",
         "leftshift" | "lshift" => "LeftShift",
         "rightshift" | "rshift" => "RightShift",
-        "leftcmd" | "leftcommand" | "lcmd" => "LeftCmd",
-        "rightcmd" | "rightcommand" | "rcmd" => "RightCmd",
+        "leftcmd" | "leftcommand" | "lcmd" | "leftwin" | "lwin" | "leftwindows" => "LeftCmd",
+        "rightcmd" | "rightcommand" | "rcmd" | "rightwin" | "rwin" | "rightwindows" => "RightCmd",
+        "capslock" | "caps" => "CapsLock",
+        "menu" | "apps" | "application" | "contextmenu" => "Menu",
+        "printscreen" | "prtsc" | "print" => "PrintScreen",
         "escape" | "esc" => "Esc",
         "return" | "enter" => "Enter",
         "backspace" => "Backspace",
@@ -776,7 +836,7 @@ mod tests {
     }
 
     fn toggle_sim() -> Sim {
-        Sim::new(&ShortcutBindings { trigger: TriggerMode::Toggle, ..ShortcutBindings::default() })
+        Sim::new(&ShortcutBindings { trigger: TriggerMode::Toggle, ..ShortcutBindings::mac_defaults() })
     }
 
     /// Simulates the controller: its phase follows the actions immediately.
@@ -791,7 +851,7 @@ mod tests {
             Self { m: GestureMachine::new(b), phase: Idle, t: 1000 }
         }
         fn default() -> Self {
-            Self::new(&ShortcutBindings::default())
+            Self::new(&ShortcutBindings::mac_defaults())
         }
         fn advance(&mut self, ms: u64) -> Vec<HotkeyAction> {
             self.t += ms;
@@ -1235,7 +1295,7 @@ mod tests {
 
     #[test]
     fn lagging_controller_phase_does_not_confuse_machine() {
-        let mut m = GestureMachine::new(&ShortcutBindings::default());
+        let mut m = GestureMachine::new(&ShortcutBindings::mac_defaults());
         // Controller keeps reporting Idle (it has not processed Start yet).
         let o = m.handle(KeyEvent { key: "Fn", down: true, t_ms: 0 }, Idle);
         assert_eq!(o.actions, start(Mode::Dictation, false));
@@ -1244,7 +1304,7 @@ mod tests {
         let o = m.handle(KeyEvent { key: "Fn", down: false, t_ms: 200 }, Idle);
         assert!(o.actions.is_empty());
 
-        let mut m = GestureMachine::new(&ShortcutBindings::default());
+        let mut m = GestureMachine::new(&ShortcutBindings::mac_defaults());
         m.handle(KeyEvent { key: "Fn", down: true, t_ms: 0 }, Idle);
         let o = m.handle(KeyEvent { key: "Fn", down: false, t_ms: 600 }, RecordingPtt);
         assert_eq!(o.actions, vec![HotkeyAction::Finish]);
@@ -1253,7 +1313,7 @@ mod tests {
     #[test]
     fn rejected_start_still_gets_its_closing_action() {
         // Controller never left Idle (e.g. mic failure) and the grace period expired: release still finishes.
-        let mut m = GestureMachine::new(&ShortcutBindings::default());
+        let mut m = GestureMachine::new(&ShortcutBindings::mac_defaults());
         m.handle(KeyEvent { key: "Fn", down: true, t_ms: 0 }, Idle);
         let o = m.handle(KeyEvent { key: "Fn", down: false, t_ms: 2000 }, Idle);
         assert_eq!(o.actions, vec![HotkeyAction::Finish]);
@@ -1262,7 +1322,7 @@ mod tests {
     #[test]
     fn controller_finished_on_its_own_means_release_is_inert() {
         // 20 minute auto-finish: controller is Processing when the user finally releases.
-        let mut m = GestureMachine::new(&ShortcutBindings::default());
+        let mut m = GestureMachine::new(&ShortcutBindings::mac_defaults());
         m.handle(KeyEvent { key: "Fn", down: true, t_ms: 0 }, Idle);
         let o = m.handle(KeyEvent { key: "Fn", down: false, t_ms: 5_000_000 }, Processing);
         assert!(o.actions.is_empty());
@@ -1323,30 +1383,47 @@ mod tests {
 
     #[test]
     fn keycodes_and_names() {
-        assert_eq!(key_for_code(63), Some("Fn"));
-        assert_eq!(key_for_code(114), Some("Help"));
-        assert_eq!(key_for_code(53), Some("Esc"));
-        assert_eq!(key_for_code(49), Some("Space"));
-        assert_eq!(key_for_code(56), Some("LeftShift"));
-        assert_eq!(key_for_code(60), Some("RightShift"));
-        assert_eq!(key_for_code(59), Some("LeftCtrl"));
-        assert_eq!(key_for_code(62), Some("RightCtrl"));
-        assert_eq!(key_for_code(58), Some("LeftOption"));
-        assert_eq!(key_for_code(61), Some("RightOption"));
-        assert_eq!(key_for_code(55), Some("LeftCmd"));
-        assert_eq!(key_for_code(54), Some("RightCmd"));
-        assert_eq!(key_for_code(9), Some("V"));
-        assert_eq!(key_for_code(96), Some("F5"));
-        assert_eq!(key_for_code(126), Some("Up"));
+        let mac = |c: u16| MAC_KEYS.iter().find(|(k, _)| *k == c).map(|(_, n)| *n);
+        assert_eq!(mac(63), Some("Fn"));
+        assert_eq!(mac(114), Some("Help"));
+        assert_eq!(mac(53), Some("Esc"));
+        assert_eq!(mac(49), Some("Space"));
+        assert_eq!(mac(56), Some("LeftShift"));
+        assert_eq!(mac(60), Some("RightShift"));
+        assert_eq!(mac(59), Some("LeftCtrl"));
+        assert_eq!(mac(62), Some("RightCtrl"));
+        assert_eq!(mac(58), Some("LeftOption"));
+        assert_eq!(mac(61), Some("RightOption"));
+        assert_eq!(mac(55), Some("LeftCmd"));
+        assert_eq!(mac(54), Some("RightCmd"));
+        assert_eq!(mac(9), Some("V"));
+        assert_eq!(mac(96), Some("F5"));
+        assert_eq!(mac(126), Some("Up"));
+        let win = |c: u16| WIN_KEYS.iter().find(|(k, _)| *k == c).map(|(_, n)| *n);
+        assert_eq!(win(0x5B), Some("LeftCmd"));
+        assert_eq!(win(0x5C), Some("RightCmd"));
+        assert_eq!(win(0xA4), Some("LeftOption"));
+        assert_eq!(win(0xA5), Some("RightOption"));
+        assert_eq!(win(0xA2), Some("LeftCtrl"));
+        assert_eq!(win(0x20), Some("Space"));
+        assert_eq!(win(0x56), Some("V"));
+        assert_eq!(win(0x14), Some("CapsLock"));
+        assert_eq!(win(VK_NUMPAD_ENTER), Some("NumEnter"));
+        #[cfg(windows)]
+        assert_eq!(code_for_key("V"), Some(0x56));
+        #[cfg(not(windows))]
         assert_eq!(code_for_key("V"), Some(9));
+        assert_eq!(key_for_code(code_for_key("Esc").unwrap()), Some("Esc"));
         assert_eq!(mouse_button_name(2), Some("Mouse3"));
         assert_eq!(mouse_button_name(3), Some("Mouse4"));
         assert_eq!(mouse_button_name(4), Some("Mouse5"));
         assert_eq!(mouse_button_name(0), None);
         // every key code and name is unique
-        for (i, (c, n)) in KEYS.iter().enumerate() {
-            for (c2, n2) in &KEYS[i + 1..] {
-                assert!(c != c2 && n != n2, "duplicate {c} {n}");
+        for table in [MAC_KEYS, WIN_KEYS] {
+            for (i, (c, n)) in table.iter().enumerate() {
+                for (c2, n2) in &table[i + 1..] {
+                    assert!(c != c2 && n != n2, "duplicate {c} {n}");
+                }
             }
         }
         assert_eq!(unknown_key_name("Key", 200), unknown_key_name("Key", 200));

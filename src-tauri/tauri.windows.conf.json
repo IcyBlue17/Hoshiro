@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Hoshiro",
+        "url": "index.html",
+        "width": 1080,
+        "height": 750,
+        "minWidth": 880,
+        "minHeight": 600,
+        "center": true,
+        "decorations": false,
+        "shadow": true,
+        "visible": false,
+        "create": false
+      },
+      {
+        "label": "bar",
+        "title": "Hoshiro Bar",
+        "url": "index.html",
+        "width": 560,
+        "height": 460,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "focusable": false,
+        "visible": false
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["nsis"],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  }
+}

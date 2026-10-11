@@ -57,7 +57,7 @@
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.12);
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
-  font: 600 11px/1 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
   color: #f2f2f2;
   vertical-align: 1px;
 }

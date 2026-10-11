@@ -204,6 +204,8 @@ fn setup(app: &mut tauri::App, autostart_launch: bool) -> Result<(), Box<dyn std
     }
 
     state::set_dock_visibility(&handle, settings.show_in_dock);
+    // The application menu is a macOS concept; on Windows `set_menu` would add a menu bar to every window.
+    #[cfg(target_os = "macos")]
     match tray::build_app_menu(&handle) {
         Ok(menu) => {
             if let Err(e) = app.set_menu(menu) {

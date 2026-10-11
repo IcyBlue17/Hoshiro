@@ -22,7 +22,7 @@ pub struct AppContext {
 }
 
 /// Fast (< ~50 ms) snapshot of the frontmost app and focused element.
-/// `want_selection`: also read selected text (via AX; falls back to a Cmd+C round-trip that restores the
+/// `want_selection`: also read selected text (via AX / UI Automation; falls back to a Cmd+C / Ctrl+C round-trip that restores the
 /// clipboard, only when `allow_copy_fallback` is true — that fallback can add up to ~200 ms, so call this
 /// from a worker thread, never from the hotkey callback).
 pub fn capture(want_selection: bool, allow_copy_fallback: bool) -> AppContext {
@@ -30,7 +30,11 @@ pub fn capture(want_selection: bool, allow_copy_fallback: bool) -> AppContext {
     {
         mac_impl::capture(want_selection, allow_copy_fallback)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        win_impl::capture(want_selection, allow_copy_fallback)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = (want_selection, allow_copy_fallback);
         AppContext::default()
@@ -43,7 +47,11 @@ pub fn focused_text_value() -> Option<String> {
     {
         mac_impl::focused_text_value()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        win_impl::focused_text_value()
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         None
     }
@@ -51,7 +59,7 @@ pub fn focused_text_value() -> Option<String> {
 
 /// Pure helper: up to `max_chars` UTF-16 units around `caret` (a UTF-16 offset), with a bias towards the text before the caret.
 /// Never splits surrogate pairs.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 pub(crate) fn window_around(text: &str, caret_utf16: usize, max_chars: usize) -> String {
     let units: Vec<u16> = text.encode_utf16().collect();
     if units.len() <= max_chars {
@@ -73,6 +81,10 @@ pub(crate) fn window_around(text: &str, caret_utf16: usize, max_chars: usize) ->
     }
     String::from_utf16_lossy(&units[start..end])
 }
+
+#[cfg(windows)]
+#[path = "context_win.rs"]
+mod win_impl;
 
 #[cfg(target_os = "macos")]
 mod mac_impl {

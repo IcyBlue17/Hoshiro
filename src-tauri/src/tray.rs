@@ -1,4 +1,4 @@
-//! Menu-bar tray icon + macOS application menu.
+//! Menu-bar / notification-area tray icon + macOS application menu.
 
 use crate::audio::Recorder;
 use crate::controller::Cmd;
@@ -57,19 +57,64 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     Menu::with_items(app, &[&home, &history, &dict, &mic_menu, &paste, &settings, &sep, &ver, &upd, &quit])
 }
 
+/// The tray glyph is black on transparent: a template image on macOS (the menu bar recolors it). Windows
+/// shows it as is, so the dark taskbar (the default) gets a white copy.
+fn tray_icon() -> anyhow::Result<Image<'static>> {
+    let icon = Image::from_bytes(include_bytes!("../icons/tray.png"))?.to_owned();
+    if cfg!(windows) && !light_taskbar() {
+        let mut rgba = icon.rgba().to_vec();
+        for px in rgba.chunks_exact_mut(4) {
+            px[0] = 255 - px[0];
+            px[1] = 255 - px[1];
+            px[2] = 255 - px[2];
+        }
+        return Ok(Image::new_owned(rgba, icon.width(), icon.height()));
+    }
+    Ok(icon)
+}
+
+/// Windows: is the taskbar light (Settings > Personalization > Colors > "Choose your default Windows mode")?
+#[cfg(windows)]
+fn light_taskbar() -> bool {
+    use windows::core::w;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let mut value = 0u32;
+    let mut len = std::mem::size_of::<u32>() as u32;
+    let r = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+            w!("SystemUsesLightTheme"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut u32 as *mut _),
+            Some(&mut len),
+        )
+    };
+    r.is_ok() && value == 1
+}
+
+#[cfg(not(windows))]
+fn light_taskbar() -> bool {
+    true
+}
+
 pub fn setup(app: &AppHandle) -> anyhow::Result<()> {
-    let icon = Image::from_bytes(include_bytes!("../icons/tray.png"))?;
     let menu = build_menu(app)?;
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(icon)
+        .icon(tray_icon()?)
         .icon_as_template(true)
         .tooltip("Hoshiro")
         .menu(&menu)
-        .show_menu_on_left_click(true)
-        .on_tray_icon_event(|tray, event| {
-            if matches!(event, TrayIconEvent::Enter { .. }) {
-                refresh(tray.app_handle());
+        // macOS: the menu opens on click. Windows convention: click opens the app, right-click the menu.
+        .show_menu_on_left_click(!cfg!(windows))
+        .on_tray_icon_event(|tray, event| match event {
+            TrayIconEvent::Enter { .. } => refresh(tray.app_handle()),
+            #[cfg(windows)]
+            TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, button_state: tauri::tray::MouseButtonState::Up, .. } => {
+                notify::show_main(tray.app_handle());
             }
+            _ => {}
         })
         .build(app)?;
     refresh(app);
@@ -108,6 +153,12 @@ pub fn refresh(app: &AppHandle) {
                 if let Some(tray) = app.tray_by_id(TRAY_ID) {
                     if let Err(e) = tray.set_menu(Some(menu)) {
                         log::warn!("cannot update tray menu: {e}");
+                    }
+                    if cfg!(windows) {
+                        // Follow taskbar theme switches.
+                        if let Ok(icon) = tray_icon() {
+                            let _ = tray.set_icon(Some(icon));
+                        }
                     }
                 }
             }
@@ -148,6 +199,7 @@ fn select_mic(app: &AppHandle, device: Option<String>) {
     });
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     // In-app About (Settings › 关于) rather than the stock macOS panel.
     let about = MenuItem::with_id(app, "app:about", "关于 Hoshiro", true, None::<&str>)?;

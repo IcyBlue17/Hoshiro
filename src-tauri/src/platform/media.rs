@@ -6,6 +6,8 @@ pub struct MuteGuard {
     was_muted: bool,
     #[cfg(target_os = "macos")]
     state: mac_impl::Muted,
+    #[cfg(windows)]
+    state: win_impl::Muted,
 }
 
 #[cfg(target_os = "macos")]
@@ -15,7 +17,14 @@ impl Drop for MuteGuard {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+impl Drop for MuteGuard {
+    fn drop(&mut self) {
+        win_impl::restore(&self.state);
+    }
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 impl Drop for MuteGuard {
     fn drop(&mut self) {}
 }
@@ -29,9 +38,89 @@ pub fn mute_system_output() -> Option<MuteGuard> {
     {
         mac_impl::mute().map(|state| MuteGuard { was_muted: false, state })
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        win_impl::mute().map(|state| MuteGuard { was_muted: false, state })
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         None
+    }
+}
+
+#[cfg(windows)]
+mod win_impl {
+    //! Default render endpoint mute via IAudioEndpointVolume (what the volume flyout's mute button does).
+    use crate::platform::win::ensure_com;
+    use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+    use windows::Win32::Media::Audio::{eConsole, eRender, IMMDeviceEnumerator, MMDeviceEnumerator};
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+
+    pub struct Muted {
+        device_id: String,
+    }
+
+    fn default_endpoint() -> Option<(String, IAudioEndpointVolume)> {
+        ensure_com();
+        unsafe {
+            let e: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+            let dev = e.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
+            let id = dev.GetId().ok().map(|p| {
+                let s = p.to_string().unwrap_or_default();
+                windows::Win32::System::Com::CoTaskMemFree(Some(p.0 as *const _));
+                s
+            })?;
+            let vol: IAudioEndpointVolume = dev.Activate(CLSCTX_ALL, None).ok()?;
+            Some((id, vol))
+        }
+    }
+
+    pub fn mute() -> Option<Muted> {
+        let (device_id, vol) = default_endpoint()?;
+        unsafe {
+            if vol.GetMute().ok()?.as_bool() {
+                return None; // already muted by the user
+            }
+            vol.SetMute(true, std::ptr::null()).ok()?;
+        }
+        log::debug!("muted output endpoint {device_id}");
+        Some(Muted { device_id })
+    }
+
+    /// The device we muted, even if it is no longer the default output.
+    fn device_volume(id: &str) -> Option<IAudioEndpointVolume> {
+        ensure_com();
+        unsafe {
+            let e: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+            let wid = crate::platform::win::wide(id);
+            let dev = e.GetDevice(windows::core::PCWSTR(wid.as_ptr())).ok()?;
+            dev.Activate(CLSCTX_ALL, None).ok()
+        }
+    }
+
+    pub fn restore(state: &Muted) {
+        let Some(vol) = device_volume(&state.device_id) else { return };
+        unsafe {
+            // Only undo our own change.
+            if vol.GetMute().is_ok_and(|m| m.as_bool()) {
+                let _ = vol.SetMute(false, std::ptr::null());
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        /// Briefly mutes the real output device: run with `--ignored`.
+        #[test]
+        #[ignore = "changes the real system mute for a moment"]
+        fn mute_and_restore() {
+            if let Some(state) = super::mute() {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                super::restore(&state);
+                let again = super::mute().expect("mutable again");
+                super::restore(&again);
+            }
+        }
     }
 }
 

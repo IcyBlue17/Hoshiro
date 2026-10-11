@@ -5,6 +5,9 @@ import logo from "./assets/logo.png";
 import { api } from "../lib/ipc";
 import type { TypelessDetection, TypelessImportResult } from "../lib/types";
 import { useApp } from "./store";
+import { WindowControls } from "./WindowControls";
+import { IS_WINDOWS } from "../lib/platform";
+import { DEFAULT_SHORTCUTS, dictationKeyText } from "./format";
 import { useFeedback } from "./feedback";
 import { Keycap, ShortcutKeys, Spinner } from "./ui";
 import { Group } from "./settings/shared";
@@ -32,7 +35,8 @@ export function Onboarding({ onDone }: { onDone: () => Promise<void> }) {
   const steps = useMemo<StepId[]>(() => {
     const s: StepId[] = ["welcome"];
     if (det?.installed && det.dataFound) s.push("import");
-    s.push("permissions", "providers", "fn", "try", "done");
+    // PCs never expose Fn to the OS, so there is no 🌐-key setting to change on Windows.
+    s.push("permissions", "providers", ...(IS_WINDOWS ? [] : (["fn"] as StepId[])), "try", "done");
     return s;
   }, [det]);
 
@@ -56,6 +60,7 @@ export function Onboarding({ onDone }: { onDone: () => Promise<void> }) {
   return (
     <div className="onboarding">
       <div className="drag-strip" data-tauri-drag-region />
+      <WindowControls />
       <div className="ob-glow" />
       <div className="ob-shell">
         <div className="ob-stage">
@@ -105,6 +110,8 @@ export function Onboarding({ onDone }: { onDone: () => Promise<void> }) {
 }
 
 function Welcome() {
+  const { settings } = useApp();
+  const key = dictationKeyText(settings.shortcuts);
   return (
     <div className="ob-center">
       <motion.img
@@ -116,7 +123,7 @@ function Welcome() {
         transition={{ type: "spring", stiffness: 300, damping: 22 }}
       />
       <h1 className="ob-title">欢迎使用 Hoshiro</h1>
-      <p className="ob-sub">说话，不要打字。按住 Fn 说话，松开后，整理好的文字会直接出现在任何应用的光标处。</p>
+      <p className="ob-sub">说话，不要打字。按住 {key} 说话，松开后，整理好的文字会直接出现在任何应用的光标处。</p>
       <div className="ob-feature-row">
         <div className="ob-feature">
           <b>口述</b>
@@ -173,7 +180,7 @@ function ImportStep({ det, onDetect }: { det: TypelessDetection | null; onDetect
         {det?.running && (
           <div className="banner warn inline">
             <AlertTriangle size={16} />
-            <span className="banner-text">Typeless 正在运行，会与 Hoshiro 抢占 Fn 键</span>
+            <span className="banner-text">Typeless 正在运行，会与 Hoshiro 抢占{IS_WINDOWS ? "快捷键" : " Fn 键"}</span>
             <button
               className="btn btn-secondary btn-sm"
               disabled={quitting}
@@ -220,7 +227,11 @@ function PermStep() {
   return (
     <div className="ob-center">
       <h1 className="ob-title">在您的电脑上设置 Hoshiro</h1>
-      <p className="ob-sub">需要以下权限，才能听到您说话、识别快捷键并把文字输入到光标处。</p>
+      <p className="ob-sub">
+        {IS_WINDOWS
+          ? "需要麦克风权限才能听到您说话。快捷键识别和文字输入在 Windows 上无需额外授权。"
+          : "需要以下权限，才能听到您说话、识别快捷键并把文字输入到光标处。"}
+      </p>
       <div className="ob-card flush">
         <Group>
           <PermissionRows />
@@ -263,7 +274,8 @@ function FnStep() {
 
 function TryStep() {
   const { settings } = useApp();
-  const first = settings.shortcuts.dictation[0] ?? "Fn";
+  const first = settings.shortcuts.dictation[0] ?? DEFAULT_SHORTCUTS.dictation[0];
+  const keyText = dictationKeyText(settings.shortcuts);
   const toggle = settings.shortcuts.trigger === "toggle";
   return (
     <div className="ob-center">
@@ -275,9 +287,9 @@ function TryStep() {
           <>点击下面的输入框，然后按住 <ShortcutKeys shortcut={first} size="sm" /> 说话，松开即可输入。</>
         )}
       </p>
-      <textarea className="textarea ob-textarea" rows={6} placeholder={toggle ? "按一下 fn 开始说话，再按一下即可输入" : "按住 fn 说话，松开即可输入"} autoFocus spellCheck={false} />
+      <textarea className="textarea ob-textarea" rows={6} placeholder={toggle ? `按一下 ${keyText} 开始说话，再按一下即可输入` : `按住 ${keyText} 说话，松开即可输入`} autoFocus spellCheck={false} />
       <p className="srow-desc">
-        {toggle ? "录音时按 Esc 可取消。" : `轻点 ${first === "Fn" ? "Fn" : "快捷键"} 后再按一次进入免提模式；按 Esc 取消。`}
+        {toggle ? "录音时按 Esc 可取消。" : `连按两次 ${keyText} 进入免提模式；按 Esc 取消。`}
       </p>
     </div>
   );

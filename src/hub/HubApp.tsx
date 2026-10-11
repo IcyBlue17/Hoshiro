@@ -13,6 +13,7 @@ import { DictionaryPage } from "./Dictionary";
 import { SettingsModal } from "./settings/SettingsModal";
 import { Onboarding } from "./Onboarding";
 import { UpdateProvider } from "./update";
+import { WindowControls } from "./WindowControls";
 
 function useTheme(appearance: Appearance | undefined) {
   useEffect(() => {
@@ -94,6 +95,7 @@ export default function HubApp() {
         ) : (
           <div className="hub">
             <div className="drag-strip" data-tauri-drag-region />
+            <WindowControls />
             <Sidebar page={page} />
             <main className="main">
               <AnimatePresence mode="wait" initial={false}>
