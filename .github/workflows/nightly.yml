@@ -179,13 +179,19 @@ jobs:
           path: out/*
           if-no-files-found: error
 
+      # 容器里以 root 运行：把工作目录的属主还给宿主机上的 runner 用户，后面跑在宿主机上的任务才能写入
+      - name: Restore workspace ownership
+        if: always()
+        run: chown -R "$(stat -c %u:%g "$RUNNER_TEMP")" "$GITHUB_WORKSPACE"
+
   publish:
     needs: [build, windows, linux]
     runs-on: ${{ fromJSON(vars.LINUX_RUNS_ON || '["self-hosted","linux","x64","hyt-hk","ci"]') }}
     steps:
+      # 下载到 runner 的临时目录（每个任务开始时清空），不碰工作目录
       - uses: actions/download-artifact@v4
         with:
-          path: out
+          path: ${{ runner.temp }}/out
           merge-multiple: true
 
       - name: Publish nightly release
@@ -207,5 +213,6 @@ jobs:
           首次打开如果提示“已损坏”，在终端执行 \`xattr -cr /Applications/Hoshiro.app\`。
           EOF
           gh release delete nightly --cleanup-tag --yes || true
-          gh release create nightly out/*.dmg out/*.exe out/*.deb out/*.rpm out/*.AppImage --prerelease --target "$GITHUB_SHA" \
+          out="$RUNNER_TEMP/out"
+          gh release create nightly "$out"/*.dmg "$out"/*.exe "$out"/*.deb "$out"/*.rpm "$out"/*.AppImage --prerelease --target "$GITHUB_SHA" \
             --title "Nightly (${short})" --notes-file notes.md

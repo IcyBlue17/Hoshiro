@@ -171,6 +171,11 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
 
+      # 容器里以 root 运行：把工作目录的属主还给宿主机上的 runner 用户，后面跑在宿主机上的任务才能写入
+      - name: Restore workspace ownership
+        if: always()
+        run: chown -R "$(stat -c %u:%g "$RUNNER_TEMP")" "$GITHUB_WORKSPACE"
+
   publish:
     needs: [build, windows, linux]
     runs-on: ${{ fromJSON(vars.LINUX_RUNS_ON || '["self-hosted","linux","x64","hyt-hk","release"]') }}
