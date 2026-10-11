@@ -4,11 +4,11 @@ Hoshiro 不设中心化账户体系，无自建后端服务。
 
 ## 本地存储位置
 
-| 数据类型 | 本地路径 |
-|---|---|
-| 历史记录、录音音频、词典、统计指标 | `~/Library/Application Support/cn.icybit.hoshiro/` |
-| 服务商 API Key | macOS 系统钥匙串（条目名 `cn.icybit.hoshiro`） |
-| 运行日志 | `~/Library/Application Support/cn.icybit.hoshiro/logs/` |
+| 数据类型 | macOS | Windows |
+|---|---|---|
+| 历史记录、录音音频、词典、统计指标 | `~/Library/Application Support/cn.icybit.hoshiro/` | `%APPDATA%\cn.icybit.hoshiro\` |
+| 服务商 API Key | 系统钥匙串（条目名 `cn.icybit.hoshiro`） | 凭据管理器（`credentials.cn.icybit.hoshiro`） |
+| 运行日志 | `~/Library/Application Support/cn.icybit.hoshiro/logs/` | `%APPDATA%\cn.icybit.hoshiro\logs\` |
 
 本地应用配置文件中不存储任何明文 API 凭证。
 
@@ -31,6 +31,14 @@ Hoshiro 不设中心化账户体系，无自建后端服务。
 
 ## 完整卸载
 
+**macOS**
+
 1. 移除应用程序：`/Applications/Hoshiro.app`。
 2. 清理用户数据目录：`~/Library/Application Support/cn.icybit.hoshiro/`。
 3. 打开系统「钥匙串访问」，删除条目 `cn.icybit.hoshiro`。
+
+**Windows**
+
+1. 在「设置 › 应用 › 已安装的应用」中卸载 Hoshiro。
+2. 删除用户数据目录：`%APPDATA%\cn.icybit.hoshiro\`。
+3. 打开「控制面板 › 凭据管理器 › Windows 凭据」，删除以 `credentials.cn.icybit.hoshiro` 开头的条目。

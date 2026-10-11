@@ -29,7 +29,7 @@ const vReveal: Directive<HTMLElement, number | undefined> = {
 onBeforeUnmount(() => observed.forEach((io) => io.disconnect()));
 
 const MODES = [
-  { name: "口述", keys: ["fn"], hint: "长按输入 / 双击免提", desc: "长按 Fn 说话，松开后自动将润色文本插入光标处。双击 Fn 锁定录音进入免提模式，适合长篇录入。" },
+  { name: "口述", keys: ["fn"], hint: "长按输入 / 双击免提", desc: "长按 Fn（Windows：Ctrl + Win）说话，松开后自动将润色文本插入光标处。双击锁定录音进入免提模式，适合长篇录入。" },
   { name: "翻译", keys: ["fn", "⇧"], hint: "即时外语翻译", desc: "口述源语言，系统直接转录并翻译为目标语言后插入。悬浮条支持快速切换目标语种。" },
   { name: "改写", keys: ["fn", "Space"], hint: "选中文本时触发", desc: "选中文本后口述指令（如“改礼貌点”、“精简表达”、“翻译成英文”），结果原地替换。" },
   { name: "问答", keys: ["fn", "Space"], hint: "未选中文本时触发", desc: "未选中文本时长按直接提问，回答以卡片形式呈现在屏幕底部，支持一键复制与 Markdown 渲染。" },
@@ -64,17 +64,17 @@ const LLM = [
         <div class="lp-kicker">HOSHIRO · MACOS 语音输入法</div>
         <h1 class="lp-title">按住说话，<br />松开上屏。</h1>
         <p class="lp-sub">
-          基于 Tauri 2 开发的 macOS 语音输入法。自动过滤口癖与停顿、修正改口并规范排版。<br />
+          基于 Tauri 2 开发的 macOS / Windows 语音输入法。自动过滤口癖与停顿、修正改口并规范排版。<br />
           自带 API Key 直连服务商，无中间服务器，数据完全保存在本地。
         </p>
         <div class="lp-actions">
-          <a class="btn btn-ink" :href="DOWNLOAD" target="_blank" rel="noreferrer">下载 macOS 版 (.dmg)</a>
+          <a class="btn btn-ink" :href="DOWNLOAD" target="_blank" rel="noreferrer">下载 macOS / Windows 版</a>
           <a class="link-arrow" :href="withBase('/guide/getting-started')">查阅使用指南 →</a>
           <a class="link-arrow" :href="REPO" target="_blank" rel="noreferrer">GitHub 仓库 →</a>
         </div>
 
         <dl class="lp-spec">
-          <div><dt>系统架构</dt><dd>macOS 13+（Apple Silicon 与 Intel 原生支持）</dd></div>
+          <div><dt>系统架构</dt><dd>macOS 13+（Apple Silicon 与 Intel）· Windows 10 / 11（x64）</dd></div>
           <div><dt>技术栈</dt><dd>Tauri 2 (Rust) + React 19，本地直连 ASR 与 LLM</dd></div>
           <div><dt>隐私与存储</dt><dd>数据保存在本地 SQLite，API Key 存入系统钥匙串</dd></div>
           <div><dt>迁移兼容</dt><dd>完全兼容 Typeless 交互逻辑，支持一键导入配置与历史记录</dd></div>
@@ -110,7 +110,7 @@ const LLM = [
         <div v-reveal class="lp-side">
           <div class="lp-label">INPUT MODES</div>
           <h2 class="lp-h2">四种输入模式</h2>
-          <p class="lp-p">覆盖长按口述、长篇免提、实时翻译与就地改写。支持自定义独立修饰键（如 Fn、右 Option）、组合键及鼠标侧键。</p>
+          <p class="lp-p">覆盖长按口述、长篇免提、实时翻译与就地改写。支持自定义独立修饰键（如 Fn、右 Option；Windows 上的右 Alt、Caps Lock）、组合键及鼠标侧键。</p>
         </div>
         <div v-reveal="80" class="modes">
           <div v-for="m in MODES" :key="m.name" class="mode">
@@ -161,7 +161,7 @@ const LLM = [
           </div>
           <div class="feat">
             <div class="feat-art privacy-art">
-              <span class="node">Mac 本地</span><span class="wire" /><span class="node">模型服务商</span>
+              <span class="node">本机</span><span class="wire" /><span class="node">模型服务商</span>
             </div>
             <h3>纯本地存储与系统钥匙串</h3>
             <p>历史记录、音频切片与词典保存在本地 SQLite，API Key 存放于系统钥匙串，无外部中转。</p>
@@ -218,7 +218,7 @@ const LLM = [
       <div class="lp-wrap">
         <h2 v-reveal class="lp-title">开始使用 Hoshiro</h2>
         <div class="lp-actions">
-          <a class="btn btn-ink" :href="DOWNLOAD" target="_blank" rel="noreferrer">下载 macOS 版</a>
+          <a class="btn btn-ink" :href="DOWNLOAD" target="_blank" rel="noreferrer">下载 macOS / Windows 版</a>
           <a class="link-arrow" :href="withBase('/guide/getting-started')">安装与配置指南 →</a>
           <a class="link-arrow" :href="REPO" target="_blank" rel="noreferrer">GitHub 源码 →</a>
         </div>

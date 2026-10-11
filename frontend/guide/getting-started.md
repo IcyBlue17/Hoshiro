@@ -6,16 +6,30 @@
 
 | 项目 | 要求 |
 |---|---|
-| 系统 | macOS 13 Ventura 及以上 |
-| 芯片 | Apple Silicon（M 系列）或 Intel |
+| 系统 | macOS 13 Ventura 及以上；或 Windows 10 / 11（x64） |
+| 芯片 | Mac：Apple Silicon（M 系列）或 Intel；PC：x64 |
 | 网络 | 能够访问所配置的语音识别 / 大模型服务商 API |
 | 凭据 | 至少一个语音识别服务的 API Key；建议同时配置文本润色模型 |
 
-> Windows / Linux 平台目前处于适配中。
+> Linux 平台目前处于适配中。
 
 ## 1. 下载安装
 
-前往 [GitHub Releases](https://github.com/IcyBlue17/hoshiro/releases/latest) 下载对应架构的 `.dmg` 安装包：
+前往 [GitHub Releases](https://github.com/IcyBlue17/hoshiro/releases/latest) 下载安装包。
+
+### Windows
+
+下载 `x64-setup.exe` 并运行。安装包按当前用户安装，不需要管理员权限，系统自带的 WebView2 即可运行。
+
+::: warning 提示“Windows 已保护你的电脑”
+安装包没有代码签名，SmartScreen 可能拦截。点击「更多信息」›「仍要运行」即可。
+:::
+
+Windows 上全局快捷键与文字插入不需要额外授权，可跳过下面的第 2 步与第 4 步。
+
+### macOS
+
+下载对应架构的 `.dmg` 安装包：
 
 - **Apple Silicon**（M 系列芯片）：下载包含 `aarch64` 的文件
 - **Intel 芯片**：下载包含 `x64` 的文件
@@ -34,7 +48,7 @@ xattr -cr /Applications/Hoshiro.app
 ```
 :::
 
-## 2. 授予系统权限
+## 2. 授予系统权限（macOS）
 
 首次启动时应用会引导授予以下三项系统权限：
 
@@ -46,6 +60,10 @@ xattr -cr /Applications/Hoshiro.app
 
 授权完成后若状态指示未立即更新，重启 Hoshiro 即可生效。后续可在「设置 › 权限」中随时检查权限状态。
 
+::: tip Windows 的麦克风权限
+Windows 只需要麦克风权限。若提示麦克风不可用，打开「设置 › 隐私和安全性 › 麦克风」，开启「麦克风访问权限」与「允许桌面应用访问麦克风」。
+:::
+
 ## 3. 配置 API Key
 
 打开「设置 › 模型服务」：
@@ -54,9 +72,9 @@ xattr -cr /Applications/Hoshiro.app
 2. **AI 改写**：选择模型服务商并填写 API Key。推荐 **Google Gemini**（默认 `gemini-flash-latest`），速度快且成本低。
 3. 点击「测试连接」，确认接口连通性。
 
-所有 API Key 均保存在 macOS 系统钥匙串中，不写入本地配置文件。各服务商详细配置参数参见 [服务商配置](./providers)。
+所有 API Key 均保存在系统凭据库（macOS 钥匙串 / Windows 凭据管理器）中，不写入本地配置文件。各服务商详细配置参数参见 [服务商配置](./providers)。
 
-## 4. 关闭系统的 🌐 键默认行为
+## 4. 关闭系统的 🌐 键默认行为（macOS）
 
 macOS 默认将单独按下 <Kbd size="sm">fn</Kbd>（🌐）映射为弹出表情符号面板或切换输入法，该行为会与 Hoshiro 的长按监听产生冲突：
 
@@ -72,6 +90,8 @@ macOS 默认将单独按下 <Kbd size="sm">fn</Kbd>（🌐）映射为弹出表�
   <Pill cycle />
   <span class="cap">→ 松开后文本自动插入光标处</span>
 </div>
+
+Windows 上请按住 <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">Win</Kbd>（PC 键盘的 Fn 由键盘固件处理，系统收不到）。
 
 屏幕底部的胶囊为 Hoshiro 悬浮条：录音时展示实时波形，松开后显示处理状态，完成后文本自动插入。
 

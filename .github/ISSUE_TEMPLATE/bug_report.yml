@@ -14,7 +14,7 @@ body:
     attributes:
       label: 复现步骤
       placeholder: |
-        1. 在 … 里按住 Fn
+        1. 在 … 里按住 Fn（Windows：Ctrl + Win）
         2. 说 …
         3. …
   - type: input
@@ -25,9 +25,10 @@ body:
     validations:
       required: true
   - type: input
-    id: macos
+    id: os
     attributes:
-      label: macOS 版本
+      label: 系统版本
+      placeholder: macOS 15.1 / Windows 11 24H2
     validations:
       required: true
   - type: input
@@ -39,5 +40,5 @@ body:
     id: logs
     attributes:
       label: 日志（可选）
-      description: 在 ~/Library/Application Support/cn.icybit.hoshiro/logs/ 里。贴之前检查有没有不想公开的内容。
+      description: macOS 在 ~/Library/Application Support/cn.icybit.hoshiro/logs/，Windows 在 %APPDATA%\cn.icybit.hoshiro\logs\。贴之前检查有没有不想公开的内容。
       render: text
