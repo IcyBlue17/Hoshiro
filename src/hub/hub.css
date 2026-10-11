@@ -194,9 +194,13 @@ h1, h2, h3, p { margin: 0; }
 }
 :root[data-theme="light"] .tooltip { background: #222; }
 
+/* Modals are centered, so this is also their distance from the top edge. On macOS it has to clear the
+   traffic lights (trafficLightPosition y = 26), or a short window puts them on the modal's border. */
+:root { --modal-gap: 20px; }
+:root[data-platform="macos"] { --modal-gap: 44px; }
 .modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg-overlay); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
 .modal {
-  max-width: calc(100vw - 32px); max-height: calc(100vh - 40px); display: flex; flex-direction: column; border-radius: 22px;
+  max-width: calc(100vw - 32px); max-height: calc(100vh - 2 * var(--modal-gap)); display: flex; flex-direction: column; border-radius: 22px;
   background: var(--bg-modal); box-shadow: var(--shadow-modal); overflow: hidden;
 }
 .modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 22px 22px 8px 26px; }
@@ -409,7 +413,7 @@ h1, h2, h3, p { margin: 0; }
 .import-count { font-size: 14.5px; margin-bottom: 12px; }
 
 /* ───────────── Settings modal ───────────── */
-.modal.settings-modal { height: min(640px, calc(100vh - 40px)); max-width: calc(100vw - 40px); }
+.modal.settings-modal { height: min(640px, calc(100vh - 2 * var(--modal-gap))); max-width: calc(100vw - 40px); }
 .settings-layout { display: flex; height: 100%; min-height: 0; }
 .settings-nav { width: 210px; flex: none; padding: 22px 12px; background: var(--bg-card-2); display: flex; flex-direction: column; gap: 3px; border-right: 1px solid var(--divider); overflow: auto; }
 .settings-heading { font-size: 18px; font-weight: 750; padding: 0 12px 14px; }
