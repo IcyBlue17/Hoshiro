@@ -16,7 +16,7 @@ Typeless 的词典存储在云端，无法直接从本地读取。用户可将�
 
 ## 避免按键监听冲突
 
-Typeless 与 Hoshiro 均依赖系统底层事件监听（macOS 的 `CGEventTap`、Windows 的低级键盘钩子）捕获全局快捷键。两者同时运行会导致快捷键事件争抢拦截。完成数据迁移后，请退出 Typeless 并关闭其开机自启选项。
+Typeless 与 Hoshiro 均依赖系统底层事件监听（macOS 的 `CGEventTap`、Windows 的低级键盘钩子、Linux 的 evdev）捕获全局快捷键。两者同时运行会导致快捷键事件争抢拦截。完成数据迁移后，请退出 Typeless 并关闭其开机自启选项。
 
 ## 功能差异对照
 

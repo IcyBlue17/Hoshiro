@@ -245,6 +245,8 @@ fn setup(app: &mut tauri::App, autostart_launch: bool) -> Result<(), Box<dyn std
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    platform::linux::prefer_x11_backend();
     migrate_data_dir();
     let autostart_launch = std::env::args().any(|a| a == "--autostart");
 

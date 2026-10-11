@@ -3,11 +3,25 @@ import { Check } from "lucide-react";
 import { api } from "../../lib/ipc";
 import { EVENTS, type PermissionKind, type Permissions } from "../../lib/types";
 import { useBackendEvent, usePoll } from "../hooks";
-import { IS_WINDOWS } from "../../lib/platform";
+import { IS_LINUX, IS_WINDOWS } from "../../lib/platform";
 import { Row } from "./shared";
 
 // Windows has no Accessibility / Input Monitoring grants: global hooks and UI Automation need no consent.
-export const PERMISSION_INFO: { kind: PermissionKind; title: string; desc: string }[] = IS_WINDOWS
+// Linux reads the keyboards and types through /dev/input and /dev/uinput: one udev rule (one password
+// prompt) grants both.
+const LINUX_PERMISSIONS: { kind: PermissionKind; title: string; desc: string }[] = [
+  { kind: "microphone", title: "麦克风", desc: "仅在您按下快捷键口述时才会使用麦克风录音。" },
+  {
+    kind: "inputMonitoring",
+    title: "读取键盘",
+    desc: "用于识别全局快捷键（读取 /dev/input）。授权会安装一条 udev 规则，需要输入管理员密码，一次授权两项。",
+  },
+  { kind: "accessibility", title: "模拟输入", desc: "用于把文字粘贴到光标处（写入 /dev/uinput）。" },
+];
+
+export const PERMISSION_INFO: { kind: PermissionKind; title: string; desc: string }[] = IS_LINUX
+  ? LINUX_PERMISSIONS
+  : IS_WINDOWS
   ? [
       {
         kind: "microphone",
@@ -46,7 +60,7 @@ export function PermissionAction({
         <Check size={15} /> 已授权
       </span>
     );
-  if (state === "denied")
+  if (state === "denied" && !IS_LINUX)
     return (
       <button className="btn btn-secondary btn-sm" onClick={() => api.openPermissionSettings(kind)}>
         {IS_WINDOWS ? "打开 Windows 设置" : "打开系统设置"}
@@ -58,10 +72,10 @@ export function PermissionAction({
       onClick={async () => {
         const p = await api.requestPermission(kind);
         onChange(p);
-        if (p[kind] !== "granted" && kind !== "microphone") api.openPermissionSettings(kind);
+        if (p[kind] !== "granted" && kind !== "microphone" && !IS_LINUX) api.openPermissionSettings(kind);
       }}
     >
-      授权
+      {state === "denied" ? "重新授权" : "授权"}
     </button>
   );
 }

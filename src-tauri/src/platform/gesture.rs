@@ -21,12 +21,14 @@ const ASSUMED_PHASE_GRACE_MS: u64 = 400;
 /// Virtual keycode -> canonical key name for the current OS.
 ///
 /// Key names are shared by every OS (settings files, Typeless imports and the UI all use them): the
-/// "Option" family is Alt on Windows and the "Cmd" family is the Windows key. `Fn` is handled by the
-/// keyboard firmware on PCs and never reaches Windows, so it only exists in the macOS table.
-#[cfg(not(windows))]
+/// "Option" family is Alt on Windows/Linux and the "Cmd" family is the Windows / Super key. `Fn` is handled by
+/// the keyboard firmware on most PCs and never reaches Windows; Linux sees it on a few keyboards (Apple's).
+#[cfg(not(any(windows, target_os = "linux")))]
 const KEYS: &[(u16, KeyName)] = MAC_KEYS;
 #[cfg(windows)]
 const KEYS: &[(u16, KeyName)] = WIN_KEYS;
+#[cfg(target_os = "linux")]
+const KEYS: &[(u16, KeyName)] = LINUX_KEYS;
 
 /// Pseudo virtual key for the numpad Enter (VK_RETURN with the extended flag) on Windows.
 pub const VK_NUMPAD_ENTER: u16 = 0x10D;
@@ -57,8 +59,31 @@ const WIN_KEYS: &[(u16, KeyName)] = &[
     (0xA4, "LeftOption"), (0xA5, "RightOption"), (0x5B, "LeftCmd"), (0x5C, "RightCmd"),
 ];
 
+/// Linux evdev key code (`KEY_*` in input-event-codes.h) -> canonical key name.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const LINUX_KEYS: &[(u16, KeyName)] = &[
+    (30, "A"), (48, "B"), (46, "C"), (32, "D"), (18, "E"), (33, "F"), (34, "G"), (35, "H"), (23, "I"),
+    (36, "J"), (37, "K"), (38, "L"), (50, "M"), (49, "N"), (24, "O"), (25, "P"), (16, "Q"), (19, "R"),
+    (31, "S"), (20, "T"), (22, "U"), (47, "V"), (17, "W"), (45, "X"), (21, "Y"), (44, "Z"),
+    (11, "0"), (2, "1"), (3, "2"), (4, "3"), (5, "4"), (6, "5"), (7, "6"), (8, "7"), (9, "8"), (10, "9"),
+    (59, "F1"), (60, "F2"), (61, "F3"), (62, "F4"), (63, "F5"), (64, "F6"), (65, "F7"), (66, "F8"),
+    (67, "F9"), (68, "F10"), (87, "F11"), (88, "F12"), (183, "F13"), (184, "F14"), (185, "F15"), (186, "F16"),
+    (187, "F17"), (188, "F18"), (189, "F19"), (190, "F20"), (191, "F21"), (192, "F22"), (193, "F23"),
+    (105, "Left"), (106, "Right"), (108, "Down"), (103, "Up"),
+    (57, "Space"), (1, "Esc"), (28, "Enter"), (15, "Tab"), (14, "Backspace"), (111, "Delete"),
+    (102, "Home"), (107, "End"), (104, "PageUp"), (109, "PageDown"), (110, "Help"),
+    (58, "CapsLock"), (127, "Menu"), (99, "PrintScreen"), (70, "ScrollLock"), (119, "Pause"),
+    (12, "-"), (13, "="), (26, "["), (27, "]"), (43, "\\"), (39, ";"), (40, "'"), (51, ","),
+    (52, "."), (53, "/"), (41, "`"),
+    (82, "Num0"), (79, "Num1"), (80, "Num2"), (81, "Num3"), (75, "Num4"), (76, "Num5"),
+    (77, "Num6"), (71, "Num7"), (72, "Num8"), (73, "Num9"), (96, "NumEnter"),
+    // modifiers (KEY_F24 = 194 is our mask key and stays unnamed)
+    (464, "Fn"), (42, "LeftShift"), (54, "RightShift"), (29, "LeftCtrl"), (97, "RightCtrl"),
+    (56, "LeftOption"), (100, "RightOption"), (125, "LeftCmd"), (126, "RightCmd"),
+];
+
 /// macOS virtual keycode -> canonical key name.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "linux"), allow(dead_code))]
 const MAC_KEYS: &[(u16, KeyName)] = &[
     (0, "A"), (11, "B"), (8, "C"), (2, "D"), (14, "E"), (3, "F"), (5, "G"), (4, "H"), (34, "I"),
     (38, "J"), (40, "K"), (37, "L"), (46, "M"), (45, "N"), (31, "O"), (35, "P"), (12, "Q"),
@@ -87,6 +112,7 @@ pub fn key_for_code(code: u16) -> Option<KeyName> {
     KEYS.iter().find(|(c, _)| *c == code).map(|(_, n)| *n)
 }
 
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub fn code_for_key(name: &str) -> Option<u16> {
     KEYS.iter().find(|(_, n)| *n == name).map(|(c, _)| *c)
 }
@@ -95,7 +121,7 @@ pub fn mouse_button_name(button: i64) -> Option<KeyName> {
     MOUSE.iter().find(|(b, _)| *b == button).map(|(_, n)| *n)
 }
 
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn mouse_button_number(name: &str) -> Option<i64> {
     MOUSE.iter().find(|(_, n)| *n == name).map(|(b, _)| *b)
 }
@@ -142,37 +168,37 @@ pub fn is_modifier(name: &str) -> bool {
 }
 
 // CGEventFlags device-independent masks.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const FLAG_SHIFT: u64 = 0x0002_0000;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const FLAG_CTRL: u64 = 0x0004_0000;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const FLAG_OPTION: u64 = 0x0008_0000;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const FLAG_CMD: u64 = 0x0010_0000;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const FLAG_FN: u64 = 0x0080_0000;
 // Device-dependent (NX_DEVICE*) bits.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const DEV_LCTRL: u64 = 0x0001;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const DEV_LSHIFT: u64 = 0x0002;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const DEV_RSHIFT: u64 = 0x0004;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const DEV_LCMD: u64 = 0x0008;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const DEV_RCMD: u64 = 0x0010;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const DEV_LOPT: u64 = 0x0020;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const DEV_ROPT: u64 = 0x0040;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const DEV_RCTRL: u64 = 0x2000;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const DEV_ALL: u64 = DEV_LCTRL | DEV_LSHIFT | DEV_RSHIFT | DEV_LCMD | DEV_RCMD | DEV_LOPT | DEV_ROPT | DEV_RCTRL;
 
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn family_flag(f: Family) -> u64 {
     match f {
         Family::Fn => FLAG_FN,
@@ -185,7 +211,7 @@ pub fn family_flag(f: Family) -> u64 {
 
 /// Interpret a `flagsChanged` event: which modifier key moved and whether it went down.
 /// Returns None for keycodes that are not tracked modifiers (e.g. Caps Lock).
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn modifier_transition(keycode: u16, flags: u64) -> Option<(KeyName, bool)> {
     let (name, device, generic) = match keycode {
         63 => ("Fn", 0, FLAG_FN),
@@ -1411,8 +1437,17 @@ mod tests {
         assert_eq!(win(VK_NUMPAD_ENTER), Some("NumEnter"));
         #[cfg(windows)]
         assert_eq!(code_for_key("V"), Some(0x56));
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
+        assert_eq!(code_for_key("V"), Some(47));
+        #[cfg(target_os = "macos")]
         assert_eq!(code_for_key("V"), Some(9));
+        let linux = |c: u16| LINUX_KEYS.iter().find(|(k, _)| *k == c).map(|(_, n)| *n);
+        assert_eq!(linux(125), Some("LeftCmd"));
+        assert_eq!(linux(100), Some("RightOption"));
+        assert_eq!(linux(57), Some("Space"));
+        assert_eq!(linux(47), Some("V"));
+        assert_eq!(linux(110), Some("Help"));
+        assert_eq!(linux(194), None);
         assert_eq!(key_for_code(code_for_key("Esc").unwrap()), Some("Esc"));
         assert_eq!(mouse_button_name(2), Some("Mouse3"));
         assert_eq!(mouse_button_name(3), Some("Mouse4"));

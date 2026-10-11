@@ -1,8 +1,9 @@
 import type { HistoryRetention, Shortcut, ShortcutBindings, TriggerMode } from "../lib/types";
-import { IS_WINDOWS } from "../lib/platform";
+import { IS_LINUX, IS_PC, IS_WINDOWS, SUPER_KEY } from "../lib/platform";
 
-/** Mirrors `ShortcutBindings::{mac,windows}_defaults` in Rust. Key names are shared: Option = Alt, Cmd = Win. */
-export const DEFAULT_SHORTCUTS: ShortcutBindings = IS_WINDOWS
+/** Mirrors `ShortcutBindings::{mac,windows}_defaults` in Rust (Linux uses the PC defaults). Key names are
+ * shared: Option = Alt, Cmd = Win / Super. */
+export const DEFAULT_SHORTCUTS: ShortcutBindings = IS_PC
   ? {
       trigger: "hold",
       dictation: ["Ctrl+Cmd"],
@@ -18,8 +19,8 @@ export const DEFAULT_SHORTCUTS: ShortcutBindings = IS_WINDOWS
       pasteLastTranscript: ["Ctrl+Cmd+V"],
     };
 
-/** Windows keyboards print words: Option is Alt, Cmd is the Windows key, Help sits where Insert is. */
-const WINDOWS_KEY_LABELS: Record<string, string> = {
+/** PC keyboards print words: Option is Alt, Cmd is the Windows / Super key, Help sits where Insert is. */
+const PC_KEY_LABELS: Record<string, string> = {
   Help: "Insert",
   Backspace: "Backspace",
   LeftCtrl: "Left Ctrl",
@@ -28,9 +29,9 @@ const WINDOWS_KEY_LABELS: Record<string, string> = {
   LeftOption: "Left Alt",
   RightOption: "Right Alt",
   Option: "Alt",
-  LeftCmd: "Left Win",
-  RightCmd: "Right Win",
-  Cmd: "Win",
+  LeftCmd: `Left ${SUPER_KEY}`,
+  RightCmd: `Right ${SUPER_KEY}`,
+  Cmd: SUPER_KEY,
   CapsLock: "Caps Lock",
   Menu: "Menu",
   PrintScreen: "PrtSc",
@@ -67,7 +68,7 @@ const KEY_LABELS: Record<string, string> = {
 };
 
 export function prettyKey(key: string): string {
-  if (IS_WINDOWS && key in WINDOWS_KEY_LABELS) return WINDOWS_KEY_LABELS[key];
+  if (IS_PC && key in PC_KEY_LABELS) return PC_KEY_LABELS[key];
   return KEY_LABELS[key] ?? key;
 }
 
@@ -94,7 +95,12 @@ export function normalizedCombo(s: Shortcut): string {
 }
 
 const RESERVED = (
-  IS_WINDOWS
+  IS_LINUX
+    ? [
+        "Option+Tab", "Option+F4", "Option+F2", "Ctrl+Option+Delete", "Ctrl+Option+T", "Cmd+Space", "Cmd+Tab",
+        "Cmd+L", "Cmd+A", "Cmd+V", "Cmd+D", "Cmd+S", "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+A", "Ctrl+S",
+      ]
+    : IS_WINDOWS
     ? [
         "Option+Tab", "Option+F4", "Option+Esc", "Ctrl+Esc", "Ctrl+Shift+Esc", "Ctrl+Option+Delete", "Cmd+L",
         "Cmd+D", "Cmd+E", "Cmd+R", "Cmd+Tab", "Cmd+V", "Cmd+I", "Cmd+X", "Cmd+Space", "Cmd+Shift+S", "Cmd+.",

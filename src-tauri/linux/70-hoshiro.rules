@@ -1,0 +1,5 @@
+# Hoshiro: let the user logged in at the seat read keyboards and mice (global shortcuts) and type through
+# uinput (pasting the transcript). "uaccess" grants the access to the active session only (systemd-logind).
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_MOUSE}=="1", TAG+="uaccess"

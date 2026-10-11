@@ -1,4 +1,5 @@
-//! Global hotkey engine (macOS: CGEventTap; Windows: low-level keyboard/mouse hooks, see `hotkey_win.rs`).
+//! Global hotkey engine (macOS: CGEventTap; Windows: low-level keyboard/mouse hooks, see `hotkey_win.rs`;
+//! Linux: evdev, see `hotkey_linux.rs`).
 //!
 //! Turns raw key events into high-level `HotkeyAction`s using Typeless semantics.
 //! Runs its own thread with a CFRunLoop. Must be cheap: never block inside the tap callback.
@@ -52,13 +53,13 @@ pub type PhaseReader = Arc<dyn Fn() -> SessionPhase + Send + Sync>;
 pub type CaptureCallback = Arc<dyn Fn(String, bool) + Send + Sync>;
 
 pub struct HotkeyEngine {
-    #[cfg(any(target_os = "macos", windows))]
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     inner: driver::Driver,
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     inner: (),
 }
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 impl HotkeyEngine {
     /// Install the global event tap and start delivering actions to `on_action`.
     /// Returns Err if the tap could not be created (missing Accessibility / Input Monitoring permission);
@@ -91,7 +92,7 @@ impl HotkeyEngine {
     }
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 impl HotkeyEngine {
     pub fn start(bindings: ShortcutBindings, phase: PhaseReader, on_action: ActionCallback) -> anyhow::Result<Self> {
         let _ = (bindings, phase, on_action);
@@ -111,6 +112,10 @@ impl HotkeyEngine {
 
 #[cfg(windows)]
 #[path = "hotkey_win.rs"]
+mod driver;
+
+#[cfg(target_os = "linux")]
+#[path = "hotkey_linux.rs"]
 mod driver;
 
 #[cfg(target_os = "macos")]

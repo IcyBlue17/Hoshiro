@@ -1,6 +1,7 @@
 //! Text insertion & clipboard.
 
 /// Insert `text` at the caret of the frontmost app.
+/// Linux: X11 clipboard + Ctrl+V typed on a uinput virtual keyboard (see `insert_linux.rs`).
 /// Windows: same scheme with the Win32 clipboard (every format snapshotted, the text flagged so clipboard
 /// history / cloud clipboard / clipboard managers skip it) and a synthetic Ctrl+V.
 /// macOS: snapshot the general pasteboard (all items/types), write text (flagged transient so clipboard managers
@@ -18,7 +19,11 @@ pub fn insert_text(text: &str) -> anyhow::Result<()> {
     {
         win_impl::insert_text(text)
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_impl::insert_text(text)
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = text;
         anyhow::bail!("insert_text is not implemented on this OS")
@@ -40,7 +45,11 @@ pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
     {
         win_impl::copy_to_clipboard(text)
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_impl::copy_to_clipboard(text)
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = text;
         anyhow::bail!("copy_to_clipboard is not implemented on this OS")
@@ -52,10 +61,16 @@ pub(crate) use mac_impl::{keycode_for_char, restore_snapshot, snapshot_pasteboar
 
 #[cfg(windows)]
 pub(crate) use win_impl::copy_selection_via_ctrl_c;
+#[cfg(target_os = "linux")]
+pub(crate) use linux_impl::copy_selection_via_ctrl_c;
 
 #[cfg(windows)]
 #[path = "insert_win.rs"]
 mod win_impl;
+
+#[cfg(target_os = "linux")]
+#[path = "insert_linux.rs"]
+mod linux_impl;
 
 #[cfg(target_os = "macos")]
 mod mac_impl {

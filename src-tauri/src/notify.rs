@@ -113,10 +113,14 @@ pub fn first_binding_label(settings: &Settings) -> String {
     settings.shortcuts.dictation.first().map(|b| key_label(b)).unwrap_or_else(|| "fn".into())
 }
 
-/// Human label for a binding such as "Fn" -> "fn", "RightOption" -> "右 ⌥" (Windows: "Ctrl+Cmd" -> "Ctrl+Win").
+/// Human label for a binding such as "Fn" -> "fn", "RightOption" -> "右 ⌥" (Windows: "Ctrl+Cmd" -> "Ctrl+Win",
+/// Linux: "Ctrl+Super").
 pub fn key_label(binding: &str) -> String {
     if cfg!(windows) {
-        return windows_key_label(binding);
+        return pc_key_label(binding, "Win");
+    }
+    if cfg!(target_os = "linux") {
+        return pc_key_label(binding, "Super");
     }
     binding
         .split('+')
@@ -143,8 +147,8 @@ pub fn key_label(binding: &str) -> String {
         .join("")
 }
 
-/// Windows keyboards print words, not symbols: Option is Alt and Cmd is the Windows key.
-fn windows_key_label(binding: &str) -> String {
+/// PC keyboards print words, not symbols: Option is Alt and Cmd is the Windows key (`super_name`).
+fn pc_key_label(binding: &str, super_name: &'static str) -> String {
     binding
         .split('+')
         .map(|k| {
@@ -155,13 +159,13 @@ fn windows_key_label(binding: &str) -> String {
             };
             let base = match base {
                 "Option" => "Alt",
-                "Cmd" => "Win",
+                "Cmd" => super_name,
                 "Esc" => "Esc",
                 "Help" => "Insert",
                 "Space" => "Space",
                 b => b,
             };
-            if matches!(base, "Alt" | "Win" | "Ctrl" | "Shift") {
+            if matches!(base, "Alt" | "Win" | "Super" | "Ctrl" | "Shift") {
                 format!("{side}{base}")
             } else {
                 k.to_string()

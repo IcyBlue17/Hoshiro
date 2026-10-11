@@ -6,14 +6,14 @@
 
 ## 按住快捷键无响应
 
-1. 检查「设置 › 权限」中 **麦克风、辅助功能、输入监控** 三项系统权限是否均已获得授权（Windows 只需麦克风）。
+1. 检查「设置 › 权限」中 **麦克风、辅助功能、输入监控** 三项系统权限是否均已获得授权（Windows 只需麦克风；Linux 见下文 [Linux 使用说明](#linux-使用说明)）。
 2. 确认未同时运行 Typeless（两者均通过底层的系统事件钩子监听按键，同时运行会发生冲突）。
 3. 检查系统菜单栏（Windows：任务栏右下角的通知区域，可能收在 ^ 里）是否存在 Hoshiro 图标，若不存在请重新启动应用。
 4. Windows：如果只在某个程序里无效，看看它是不是以管理员身份运行的（见下文）。
 
 ## 输入完成后未插入文字，弹出「复制」提示
 
-当前输入焦点未处于可编辑的文本框内。可点击目标输入框获取光标后再试；亦可直接点击提示卡片上的「复制」按钮，或使用快捷键 <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">⌘</Kbd> + <Kbd size="sm">V</Kbd>（Windows：<Kbd size="sm">Alt</Kbd> + <Kbd size="sm">Shift</Kbd> + <Kbd size="sm">V</Kbd>）手动粘贴。
+当前输入焦点未处于可编辑的文本框内。可点击目标输入框获取光标后再试；亦可直接点击提示卡片上的「复制」按钮，或使用快捷键 <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">⌘</Kbd> + <Kbd size="sm">V</Kbd>（Windows / Linux：<Kbd size="sm">Alt</Kbd> + <Kbd size="sm">Shift</Kbd> + <Kbd size="sm">V</Kbd>）手动粘贴。
 
 ## 提示「改写失败，已插入原始转录」
 
@@ -47,9 +47,27 @@ xattr -cr /Applications/Hoshiro.app
 
 PC 键盘上的 Fn 由键盘固件处理，按下时 Windows 根本收不到，因此默认使用 <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">Win</Kbd>。可在「设置 › 快捷键」中改为右 Alt、Caps Lock 等单键。从 Mac 导入的 Fn 快捷键会自动换成 Windows 默认值。
 
-## 是否支持 Linux 平台？
+## Linux 使用说明
 
-目前处于开发适配阶段，代码库已预留跨平台架构。macOS 与 Windows 已正式支持。
+Linux（x64，X11 / Wayland）已正式支持。Hoshiro 从 `/dev/input` 读取键盘、通过 `/dev/uinput` 发送粘贴快捷键，需要一条 udev 规则授予当前桌面用户访问权限。deb / rpm 安装包会自动安装；AppImage 在「设置 › 权限」点「授权」即可。也可以手动安装：
+
+```bash
+sudo tee /etc/udev/rules.d/70-hoshiro.rules >/dev/null <<'EOF'
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_MOUSE}=="1", TAG+="uaccess"
+EOF
+echo uinput | sudo tee /etc/modules-load.d/hoshiro-uinput.conf
+sudo modprobe uinput
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+已知限制：
+
+- 快捷键只监听、不拦截：组合键里的普通键（如空格）和录音时按的 Esc 也会传给当前应用，所以默认快捷键只用修饰键（<Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">Super</Kbd>）。
+- Wayland 会话下通过 XWayland 运行，以便悬浮条置顶并固定在屏幕底部；原生 Wayland 应用的名称与图标无法识别，不影响输入。
+- 粘贴按的是 V 键的物理位置，Dvorak 等非 QWERTY 布局下可能失效。
+- 「根据修改自动添加词典」在 Linux 上不可用。
 
 ## 问题反馈
 

@@ -6,12 +6,10 @@
 
 | 项目 | 要求 |
 |---|---|
-| 系统 | macOS 13 Ventura 及以上；或 Windows 10 / 11（x64） |
+| 系统 | macOS 13 Ventura 及以上；Windows 10 / 11（x64）；或 Linux（x64：Ubuntu 22.04+、Debian 12+、Fedora 38+ 等，X11 / Wayland） |
 | 芯片 | Mac：Apple Silicon（M 系列）或 Intel；PC：x64 |
 | 网络 | 能够访问所配置的语音识别 / 大模型服务商 API |
 | 凭据 | 至少一个语音识别服务的 API Key；建议同时配置文本润色模型 |
-
-> Linux 平台目前处于适配中。
 
 ## 1. 下载安装
 
@@ -26,6 +24,16 @@
 :::
 
 Windows 上全局快捷键与文字插入不需要额外授权，可跳过下面的第 2 步与第 4 步。
+
+### Linux
+
+| 发行版 | 下载 | 安装 |
+|---|---|---|
+| Debian / Ubuntu / Deepin / 统信 | `amd64.deb` | `sudo apt install ./Hoshiro_*_amd64.deb` |
+| Fedora / openSUSE / RHEL | `x86_64.rpm` | `sudo dnf install ./Hoshiro-*.x86_64.rpm` |
+| 其他发行版 | `amd64.AppImage` | `chmod +x` 后直接运行 |
+
+Hoshiro 直接从内核读取键盘（`/dev/input`）并通过虚拟键盘（`/dev/uinput`）粘贴，X11 与 Wayland 都能用。deb / rpm 安装包自带对应的 udev 规则，装好即可使用；AppImage 在引导页的权限步骤点「授权」并输入管理员密码即可。手动配置与已知限制见 [常见问题](./faq#linux-使用说明)。
 
 ### macOS
 
@@ -72,7 +80,7 @@ Windows 只需要麦克风权限。若提示麦克风不可用，打开「设置
 2. **AI 改写**：选择模型服务商并填写 API Key。推荐 **Google Gemini**（默认 `gemini-flash-latest`），速度快且成本低。
 3. 点击「测试连接」，确认接口连通性。
 
-所有 API Key 均保存在系统凭据库（macOS 钥匙串 / Windows 凭据管理器）中，不写入本地配置文件。各服务商详细配置参数参见 [服务商配置](./providers)。
+所有 API Key 均保存在系统凭据库（macOS 钥匙串 / Windows 凭据管理器 / Linux 的 GNOME 钥匙环或 KWallet）中，不写入本地配置文件。各服务商详细配置参数参见 [服务商配置](./providers)。
 
 ## 4. 关闭系统的 🌐 键默认行为（macOS）
 
@@ -91,7 +99,7 @@ macOS 默认将单独按下 <Kbd size="sm">fn</Kbd>（🌐）映射为弹出表�
   <span class="cap">→ 松开后文本自动插入光标处</span>
 </div>
 
-Windows 上请按住 <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">Win</Kbd>（PC 键盘的 Fn 由键盘固件处理，系统收不到）。
+Windows 上请按住 <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">Win</Kbd>，Linux 上按住 <Kbd size="sm">Ctrl</Kbd> + <Kbd size="sm">Super</Kbd>（PC 键盘的 Fn 由键盘固件处理，系统收不到）。
 
 屏幕底部的胶囊为 Hoshiro 悬浮条：录音时展示实时波形，松开后显示处理状态，完成后文本自动插入。
 

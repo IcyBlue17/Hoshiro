@@ -1,4 +1,4 @@
-//! Floating bar window plumbing (macOS: NSPanel below; Windows: `bar_win.rs`).
+//! Floating bar window plumbing (macOS: NSPanel below; Windows: `bar_win.rs`; Linux: `bar_linux.rs`).
 //! The "bar" webview window (label "bar", 560x460, transparent) is created from tauri.conf.json.
 //! This module turns it into a non-activating, all-spaces, above-everything panel, positions it at the
 //! bottom-center of the screen that contains the mouse / key window, and implements click-through for
@@ -25,7 +25,11 @@ pub fn setup(app: &AppHandle) -> anyhow::Result<()> {
     {
         win_impl::setup(app)
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_impl::setup(app)
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = app;
         Ok(())
@@ -38,7 +42,9 @@ pub fn show(app: &AppHandle) {
     mac_impl::show(app);
     #[cfg(windows)]
     win_impl::show(app);
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    linux_impl::show(app);
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     let _ = app;
 }
 
@@ -48,7 +54,9 @@ pub fn hide(app: &AppHandle) {
     mac_impl::hide(app);
     #[cfg(windows)]
     win_impl::hide(app);
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    linux_impl::hide(app);
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     let _ = app;
 }
 
@@ -58,7 +66,9 @@ pub fn set_hit_rects(app: &AppHandle, rects: Vec<HitRect>) {
     mac_impl::set_hit_rects(app, rects);
     #[cfg(windows)]
     win_impl::set_hit_rects(app, rects);
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    linux_impl::set_hit_rects(app, rects);
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     let _ = (app, rects);
 }
 
@@ -81,6 +91,10 @@ pub(crate) fn bottom_center_origin(visible: (f64, f64, f64, f64), win_w: f64, ga
 #[cfg(windows)]
 #[path = "bar_win.rs"]
 mod win_impl;
+
+#[cfg(target_os = "linux")]
+#[path = "bar_linux.rs"]
+mod linux_impl;
 
 #[cfg(target_os = "macos")]
 mod mac_impl {

@@ -289,6 +289,12 @@ impl Recorder {
         };
         for d in devices {
             let Ok(name) = d.name() else { continue };
+            // ALSA also lists every raw hw:/plughw:/dsnoop: node and resampler plugin; with PipeWire or
+            // PulseAudio running, only the sound server's devices are usable choices (pick the actual
+            // microphone in the system sound settings).
+            if cfg!(target_os = "linux") && !matches!(name.as_str(), "default" | "pipewire" | "pulse") {
+                continue;
+            }
             if d.default_input_config().is_err() || out.iter().any(|m| m.id == name) {
                 continue;
             }

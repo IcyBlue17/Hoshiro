@@ -54,7 +54,7 @@ pub struct ShortcutBindings {
 
 impl Default for ShortcutBindings {
     fn default() -> Self {
-        if cfg!(windows) {
+        if cfg!(not(target_os = "macos")) {
             Self::windows_defaults()
         } else {
             Self::mac_defaults()
@@ -74,8 +74,9 @@ impl ShortcutBindings {
         }
     }
 
-    /// PCs never report Fn to the OS, so Ctrl+Win takes its role: hold to talk, add Space / Left Shift for
-    /// the other modes. (In key names, Cmd = the Windows key and Option = Alt.)
+    /// PCs (Windows and Linux) never report Fn to the OS, so Ctrl+Win / Ctrl+Super takes its role: hold to
+    /// talk, add Space / Left Shift for the other modes. (In key names, Cmd = the Windows / Super key and
+    /// Option = Alt.)
     pub fn windows_defaults() -> Self {
         Self {
             trigger: TriggerMode::default(),
@@ -540,7 +541,7 @@ pub struct AskAnswer {
     pub answer: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HitRect {
     pub x: f64,

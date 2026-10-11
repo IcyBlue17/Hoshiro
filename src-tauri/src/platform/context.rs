@@ -34,7 +34,11 @@ pub fn capture(want_selection: bool, allow_copy_fallback: bool) -> AppContext {
     {
         win_impl::capture(want_selection, allow_copy_fallback)
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_impl::capture(want_selection, allow_copy_fallback)
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = (want_selection, allow_copy_fallback);
         AppContext::default()
@@ -51,7 +55,11 @@ pub fn focused_text_value() -> Option<String> {
     {
         win_impl::focused_text_value()
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_impl::focused_text_value()
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         None
     }
@@ -85,6 +93,10 @@ pub(crate) fn window_around(text: &str, caret_utf16: usize, max_chars: usize) ->
 #[cfg(windows)]
 #[path = "context_win.rs"]
 mod win_impl;
+
+#[cfg(target_os = "linux")]
+#[path = "context_linux.rs"]
+mod linux_impl;
 
 #[cfg(target_os = "macos")]
 mod mac_impl {

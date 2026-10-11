@@ -57,11 +57,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     Menu::with_items(app, &[&home, &history, &dict, &mic_menu, &paste, &settings, &sep, &ver, &upd, &quit])
 }
 
-/// The tray glyph is black on transparent: a template image on macOS (the menu bar recolors it). Windows
-/// shows it as is, so the dark taskbar (the default) gets a white copy.
+/// The tray glyph is black on transparent: a template image on macOS (the menu bar recolors it). Windows and
+/// Linux show it as is, so dark taskbars / panels (the default) get a white copy.
 fn tray_icon() -> anyhow::Result<Image<'static>> {
     let icon = Image::from_bytes(include_bytes!("../icons/tray.png"))?.to_owned();
-    if cfg!(windows) && !light_taskbar() {
+    if cfg!(any(windows, target_os = "linux")) && !light_taskbar() {
         let mut rgba = icon.rgba().to_vec();
         for px in rgba.chunks_exact_mut(4) {
             px[0] = 255 - px[0];
@@ -94,7 +94,21 @@ fn light_taskbar() -> bool {
     r.is_ok() && value == 1
 }
 
-#[cfg(not(windows))]
+/// Linux: GNOME's top bar (and most panels) are dark whatever the theme; KDE's follows the color scheme.
+#[cfg(target_os = "linux")]
+fn light_taskbar() -> bool {
+    let desktop = crate::platform::linux::desktop_name().to_ascii_uppercase();
+    if !desktop.contains("KDE") {
+        return false;
+    }
+    let scheme = dirs::config_dir()
+        .and_then(|d| std::fs::read_to_string(d.join("kdeglobals")).ok())
+        .and_then(|s| s.lines().find_map(|l| l.strip_prefix("ColorScheme=").map(str::to_string)))
+        .unwrap_or_default();
+    !scheme.to_ascii_lowercase().contains("dark")
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn light_taskbar() -> bool {
     true
 }
@@ -154,7 +168,7 @@ pub fn refresh(app: &AppHandle) {
                     if let Err(e) = tray.set_menu(Some(menu)) {
                         log::warn!("cannot update tray menu: {e}");
                     }
-                    if cfg!(windows) {
+                    if cfg!(any(windows, target_os = "linux")) {
                         // Follow taskbar theme switches.
                         if let Ok(icon) = tray_icon() {
                             let _ = tray.set_icon(Some(icon));

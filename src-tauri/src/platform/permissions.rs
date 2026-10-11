@@ -20,7 +20,15 @@ pub fn check() -> Permissions {
             input_monitoring: PermissionState::Granted,
         }
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        Permissions {
+            microphone: PermissionState::Granted,
+            accessibility: linux_impl::uinput(),
+            input_monitoring: linux_impl::input_monitoring(),
+        }
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         Permissions {
             microphone: PermissionState::Granted,
@@ -35,6 +43,7 @@ pub fn check() -> Permissions {
 ///
 /// The microphone prompt is asynchronous: the returned state may still be `NotDetermined`; poll `check()`.
 /// Windows has no consent prompt for desktop apps: a denied microphone opens the privacy settings page instead.
+/// Linux: input access installs the udev rule through pkexec (one password prompt grants both).
 pub fn request(kind: PermissionKind) -> Permissions {
     #[cfg(target_os = "macos")]
     {
@@ -50,7 +59,19 @@ pub fn request(kind: PermissionKind) -> Permissions {
             open_settings(kind);
         }
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        let now = check();
+        let missing = match kind {
+            PermissionKind::Microphone => false,
+            PermissionKind::Accessibility => now.accessibility != PermissionState::Granted,
+            PermissionKind::InputMonitoring => now.input_monitoring != PermissionState::Granted,
+        };
+        if missing {
+            linux_impl::install_rule();
+        }
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = kind;
     }
@@ -58,7 +79,7 @@ pub fn request(kind: PermissionKind) -> Permissions {
 }
 
 /// URL of the System Settings pane for a permission.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn settings_url(kind: PermissionKind) -> &'static str {
     match kind {
         PermissionKind::Microphone => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
@@ -76,19 +97,57 @@ pub fn settings_url(kind: PermissionKind) -> &'static str {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux has no settings page for input access: the guide explains the udev rule.
+#[cfg(target_os = "linux")]
+pub fn settings_url(kind: PermissionKind) -> &'static str {
+    match kind {
+        PermissionKind::Microphone => "",
+        PermissionKind::Accessibility | PermissionKind::InputMonitoring => LINUX_GUIDE_URL,
+    }
+}
+
+#[cfg(target_os = "linux")]
+const LINUX_GUIDE_URL: &str = "https://github.com/IcyBlue17/hoshiro/blob/main/docs/guide.md#linux";
+
+#[cfg(not(any(windows, target_os = "linux")))]
 const KEYBOARD_SETTINGS_URL: &str = "x-apple.systempreferences:com.apple.Keyboard-Settings.extension";
 #[cfg(windows)]
 const KEYBOARD_SETTINGS_URL: &str = "ms-settings:typing";
 
 /// Open the relevant System Settings pane.
 pub fn open_settings(kind: PermissionKind) {
+    #[cfg(target_os = "linux")]
+    if kind == PermissionKind::Microphone {
+        linux_open_panel(&[("gnome-control-center", &["sound"]), ("systemsettings", &["kcm_pulseaudio"]), ("pavucontrol", &[])]);
+        return;
+    }
     open_url(settings_url(kind));
 }
 
 /// Open System Settings > Keyboard (to set "Press 🌐 key to: Do Nothing").
 pub fn open_keyboard_settings() {
+    #[cfg(target_os = "linux")]
+    {
+        linux_open_panel(&[("gnome-control-center", &["keyboard"]), ("systemsettings", &["kcm_keys"])]);
+    }
+    #[cfg(not(target_os = "linux"))]
     open_url(KEYBOARD_SETTINGS_URL);
+}
+
+/// Run the first settings tool that exists on this desktop.
+#[cfg(target_os = "linux")]
+fn linux_open_panel(candidates: &[(&str, &[&str])]) {
+    for (cmd, args) in candidates {
+        match std::process::Command::new(cmd).args(*args).spawn() {
+            Ok(_) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                log::warn!("failed to run {cmd}: {e}");
+                return;
+            }
+        }
+    }
+    log::info!("no settings tool found for {candidates:?}");
 }
 
 fn open_url(url: &str) {
@@ -102,7 +161,13 @@ fn open_url(url: &str) {
     {
         win_impl::open_url(url);
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        if !url.is_empty() {
+            crate::platform::linux::open_url(url);
+        }
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = url;
     }
@@ -118,7 +183,11 @@ pub fn running_pids(bundle_id: &str) -> Vec<i32> {
     {
         win_impl::running_pids(bundle_id)
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_impl::running_pids(bundle_id)
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = bundle_id;
         vec![]
@@ -136,7 +205,11 @@ pub fn terminate_app(bundle_id: &str) -> bool {
     {
         win_impl::terminate_app(bundle_id)
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_impl::terminate_app(bundle_id)
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = bundle_id;
         false
@@ -146,6 +219,10 @@ pub fn terminate_app(bundle_id: &str) -> bool {
 #[cfg(windows)]
 #[path = "permissions_win.rs"]
 mod win_impl;
+
+#[cfg(target_os = "linux")]
+#[path = "permissions_linux.rs"]
+pub(crate) mod linux_impl;
 
 #[cfg(target_os = "macos")]
 mod mac_impl {
@@ -261,7 +338,7 @@ mod mac_impl {
 mod tests {
     use super::*;
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     #[test]
     fn settings_urls() {
         assert!(settings_url(PermissionKind::Microphone).ends_with("Privacy_Microphone"));
@@ -276,6 +353,14 @@ mod tests {
         let p = check();
         assert_eq!(p.accessibility, PermissionState::Granted);
         assert_eq!(p.input_monitoring, PermissionState::Granted);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_settings_point_to_the_guide() {
+        assert!(settings_url(PermissionKind::InputMonitoring).contains("guide.md#linux"));
+        assert_eq!(check().microphone, PermissionState::Granted);
+        assert!(running_pids("hoshiro-test-does-not-exist").is_empty());
     }
 
     #[cfg(target_os = "macos")]

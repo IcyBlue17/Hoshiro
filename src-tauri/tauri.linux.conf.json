@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Hoshiro",
+        "url": "index.html",
+        "width": 1080,
+        "height": 750,
+        "minWidth": 880,
+        "minHeight": 600,
+        "center": true,
+        "decorations": true,
+        "visible": false,
+        "create": false
+      },
+      {
+        "label": "bar",
+        "title": "Hoshiro Bar",
+        "url": "index.html",
+        "width": 560,
+        "height": 460,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "focusable": false,
+        "visible": false,
+        "visibleOnAllWorkspaces": true
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["deb", "rpm", "appimage"],
+    "category": "Utility",
+    "shortDescription": "按住快捷键说话，松开就是写好的字",
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/udev/rules.d/70-hoshiro.rules": "linux/70-hoshiro.rules",
+          "/usr/lib/modules-load.d/hoshiro-uinput.conf": "linux/hoshiro-uinput.conf"
+        },
+        "postInstallScript": "linux/postinst.sh"
+      },
+      "rpm": {
+        "compression": { "type": "zstd", "level": 19 },
+        "files": {
+          "/usr/lib/udev/rules.d/70-hoshiro.rules": "linux/70-hoshiro.rules",
+          "/usr/lib/modules-load.d/hoshiro-uinput.conf": "linux/hoshiro-uinput.conf"
+        },
+        "postInstallScript": "linux/postinst.sh"
+      }
+    }
+  }
+}

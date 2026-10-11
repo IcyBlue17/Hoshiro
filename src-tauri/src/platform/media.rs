@@ -8,6 +8,8 @@ pub struct MuteGuard {
     state: mac_impl::Muted,
     #[cfg(windows)]
     state: win_impl::Muted,
+    #[cfg(target_os = "linux")]
+    state: linux_impl::Muted,
 }
 
 #[cfg(target_os = "macos")]
@@ -24,7 +26,14 @@ impl Drop for MuteGuard {
     }
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(target_os = "linux")]
+impl Drop for MuteGuard {
+    fn drop(&mut self) {
+        linux_impl::restore(&self.state);
+    }
+}
+
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 impl Drop for MuteGuard {
     fn drop(&mut self) {}
 }
@@ -42,9 +51,51 @@ pub fn mute_system_output() -> Option<MuteGuard> {
     {
         win_impl::mute().map(|state| MuteGuard { was_muted: false, state })
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_impl::mute().map(|state| MuteGuard { was_muted: false, state })
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         None
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux_impl {
+    //! Default sink mute through `pactl`, which talks to PulseAudio and to PipeWire's pulse server alike.
+    use std::process::Command;
+
+    pub struct Muted {
+        sink: String,
+    }
+
+    fn pactl(args: &[&str]) -> Option<String> {
+        let out = Command::new("pactl").args(args).output().ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    fn is_muted(sink: &str) -> Option<bool> {
+        // "Mute: yes" (the label is localized on some versions, the value is not)
+        let out = pactl(&["get-sink-mute", sink])?;
+        Some(out.split_whitespace().last()? == "yes")
+    }
+
+    pub fn mute() -> Option<Muted> {
+        let sink = pactl(&["get-default-sink"]).filter(|s| !s.is_empty())?;
+        if is_muted(&sink)? {
+            return None; // already muted by the user
+        }
+        pactl(&["set-sink-mute", &sink, "1"])?;
+        log::debug!("muted sink {sink}");
+        Some(Muted { sink })
+    }
+
+    pub fn restore(state: &Muted) {
+        // Only undo our own change, on the sink we muted even if it is no longer the default.
+        if is_muted(&state.sink) == Some(true) {
+            let _ = pactl(&["set-sink-mute", &state.sink, "0"]);
+        }
     }
 }
 

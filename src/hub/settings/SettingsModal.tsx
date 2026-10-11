@@ -29,7 +29,7 @@ import { PermissionRows } from "./permissions";
 import { Personalization } from "./Personalization";
 import { AboutSection } from "../about/About";
 import { useDebouncedField } from "../ui";
-import { IS_WINDOWS } from "../../lib/platform";
+import { IS_LINUX, IS_MAC, IS_PC, IS_WINDOWS } from "../../lib/platform";
 
 const CATEGORIES: { key: SettingsCategory; label: string; icon: typeof Mic }[] = [
   { key: "general", label: "常规", icon: SlidersHorizontal },
@@ -156,12 +156,12 @@ function GeneralSection() {
           ]}
         />
       </Row>
-      {!IS_WINDOWS && (
+      {IS_MAC && (
         <Row title="在 Dock 中显示应用">
           <Switch checked={settings.showInDock} onChange={(v) => update((d) => void (d.showInDock = v))} label="在 Dock 中显示应用" />
         </Row>
       )}
-      <Row title="开机启动" desc={IS_WINDOWS ? "登录 Windows 时自动在后台启动 Hoshiro。" : "登录 Mac 时自动启动 Hoshiro。"}>
+      <Row title="开机启动" desc={IS_WINDOWS ? "登录 Windows 时自动在后台启动 Hoshiro。" : IS_LINUX ? "登录桌面时自动在后台启动 Hoshiro。" : "登录 Mac 时自动启动 Hoshiro。"}>
         <Switch checked={settings.launchAtLogin} onChange={(v) => update((d) => void (d.launchAtLogin = v))} label="开机启动" />
       </Row>
       <Row title="在桌面上显示悬浮条" desc="空闲时在屏幕底部显示待机条。">
@@ -329,7 +329,7 @@ function DataSection() {
               {det.running && (
                 <div className="banner warn inline">
                   <AlertTriangle size={16} />
-                  <span className="banner-text">Typeless 正在运行，会与 Hoshiro 抢占{IS_WINDOWS ? "快捷键" : " Fn 键"}</span>
+                  <span className="banner-text">Typeless 正在运行，会与 Hoshiro 抢占{IS_PC ? "快捷键" : " Fn 键"}</span>
                   <button
                     className="btn btn-secondary btn-sm"
                     disabled={quitting}
@@ -397,7 +397,7 @@ function PermissionsSection() {
       <Group>
         <PermissionRows />
       </Group>
-      {!IS_WINDOWS && (
+      {IS_MAC && (
         <Group>
           <Row title="Fn 键" desc="系统设置 › 键盘 › 按下 🌐 键时：不执行任何操作">
             <button className="btn btn-secondary" onClick={() => api.openKeyboardSettings()}>

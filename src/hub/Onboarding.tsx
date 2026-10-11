@@ -6,7 +6,7 @@ import { api } from "../lib/ipc";
 import type { TypelessDetection, TypelessImportResult } from "../lib/types";
 import { useApp } from "./store";
 import { WindowControls } from "./WindowControls";
-import { IS_WINDOWS } from "../lib/platform";
+import { IS_LINUX, IS_PC, IS_WINDOWS } from "../lib/platform";
 import { DEFAULT_SHORTCUTS, dictationKeyText } from "./format";
 import { useFeedback } from "./feedback";
 import { Keycap, ShortcutKeys, Spinner } from "./ui";
@@ -36,7 +36,7 @@ export function Onboarding({ onDone }: { onDone: () => Promise<void> }) {
     const s: StepId[] = ["welcome"];
     if (det?.installed && det.dataFound) s.push("import");
     // PCs never expose Fn to the OS, so there is no 🌐-key setting to change on Windows.
-    s.push("permissions", "providers", ...(IS_WINDOWS ? [] : (["fn"] as StepId[])), "try", "done");
+    s.push("permissions", "providers", ...(IS_PC ? [] : (["fn"] as StepId[])), "try", "done");
     return s;
   }, [det]);
 
@@ -180,7 +180,7 @@ function ImportStep({ det, onDetect }: { det: TypelessDetection | null; onDetect
         {det?.running && (
           <div className="banner warn inline">
             <AlertTriangle size={16} />
-            <span className="banner-text">Typeless 正在运行，会与 Hoshiro 抢占{IS_WINDOWS ? "快捷键" : " Fn 键"}</span>
+            <span className="banner-text">Typeless 正在运行，会与 Hoshiro 抢占{IS_PC ? "快捷键" : " Fn 键"}</span>
             <button
               className="btn btn-secondary btn-sm"
               disabled={quitting}
@@ -230,6 +230,8 @@ function PermStep() {
       <p className="ob-sub">
         {IS_WINDOWS
           ? "需要麦克风权限才能听到您说话。快捷键识别和文字输入在 Windows 上无需额外授权。"
+          : IS_LINUX
+          ? "需要读取键盘和模拟输入的权限，才能识别快捷键并把文字输入到光标处。"
           : "需要以下权限，才能听到您说话、识别快捷键并把文字输入到光标处。"}
       </p>
       <div className="ob-card flush">

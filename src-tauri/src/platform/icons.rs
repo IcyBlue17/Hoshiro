@@ -1,7 +1,8 @@
 //! Application icons for the usage page.
 
 /// PNG of the app's icon (square, `px` pixels), or None if the app isn't installed.
-/// `bundle_id` is the macOS bundle id, or on Windows the executable name (`code.exe`).
+/// `bundle_id` is the macOS bundle id, on Windows the executable name (`code.exe`), on Linux the lowercased
+/// WM_CLASS (`code`).
 pub fn app_icon_png(bundle_id: &str, px: u32) -> Option<Vec<u8>> {
     #[cfg(target_os = "macos")]
     {
@@ -11,7 +12,11 @@ pub fn app_icon_png(bundle_id: &str, px: u32) -> Option<Vec<u8>> {
     {
         win_impl::app_icon_png(bundle_id, px)
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_impl::app_icon_png(bundle_id, px)
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = (bundle_id, px);
         None
@@ -45,3 +50,7 @@ mod mac_impl {
 #[cfg(windows)]
 #[path = "icons_win.rs"]
 mod win_impl;
+
+#[cfg(target_os = "linux")]
+#[path = "icons_linux.rs"]
+mod linux_impl;

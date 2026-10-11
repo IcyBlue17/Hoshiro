@@ -1,6 +1,6 @@
 //! OS integration layer.
 //! Everything OS-specific lives below this module; the rest of the app only uses these public APIs.
-//! macOS and Windows are implemented; other OSes get compiling stubs (cfg-gated).
+//! macOS, Windows and Linux are implemented; other OSes get compiling stubs (cfg-gated).
 
 pub mod bar;
 mod gesture;
@@ -8,6 +8,8 @@ mod gesture;
 mod mac;
 #[cfg(windows)]
 pub(crate) mod win;
+#[cfg(target_os = "linux")]
+pub(crate) mod linux;
 pub mod context;
 pub mod hotkey;
 pub mod icons;

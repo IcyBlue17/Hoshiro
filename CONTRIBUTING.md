@@ -4,7 +4,7 @@
 
 ## 开发环境
 
-- macOS 13+（Xcode Command Line Tools）或 Windows 10/11（Visual Studio 2022 Build Tools，勾选「使用 C++ 的桌面开发」；系统自带 WebView2）
+- macOS 13+（Xcode Command Line Tools）、Windows 10/11（Visual Studio 2022 Build Tools，勾选「使用 C++ 的桌面开发」；系统自带 WebView2）或 Linux（Debian / Ubuntu：`sudo apt install build-essential pkg-config libssl-dev libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libasound2-dev`）
 - [Rust](https://rustup.rs) (stable)
 - [Bun](https://bun.sh)
 
@@ -46,6 +46,7 @@ src-tauri/src/              后端（Rust）
   platform/                 平台集成：快捷键、上下文读取、粘贴、悬浮条、静音、图标
                             macOS：CGEventTap / Accessibility / NSPanel（*.rs 内的 mac_impl）
                             Windows：低级键盘钩子 / UI Automation / 剪贴板 / 不抢焦点的工具窗口（*_win.rs）
+                            Linux：evdev / uinput 虚拟键盘 / X11 剪贴板与活动窗口 / GTK 通知窗口（*_linux.rs、linux.rs）
   audio/                    音频采集、重采样、分段切片、提示音
   providers/                ASR / LLM 客户端与提示词模板
   personalize.rs            个性化学习引擎
@@ -57,7 +58,7 @@ src-tauri/src/              后端（Rust）
 
 ## 核心交互流水线
 
-1. **按键捕获**：`platform/hotkey.rs` 通过 `CGEventTap`（Windows：`WH_KEYBOARD_LL` / `WH_MOUSE_LL` 钩子，见 `hotkey_win.rs`）捕获底层按键，由 `gesture.rs` 状态机判断长按、双击或组合键，触发对应动作。两个平台共用同一套键名（`Option` = Alt，`Cmd` = Win 键）与状态机。
+1. **按键捕获**：`platform/hotkey.rs` 通过 `CGEventTap`（Windows：`WH_KEYBOARD_LL` / `WH_MOUSE_LL` 钩子，见 `hotkey_win.rs`；Linux：evdev，见 `hotkey_linux.rs`）捕获底层按键，由 `gesture.rs` 状态机判断长按、双击或组合键，触发对应动作。所有平台共用同一套键名（`Option` = Alt，`Cmd` = Win / Super 键）与状态机。
 2. **会话调度**：`controller.rs` 调度状态迁移，启动录音并采集当前焦点应用上下文。
 3. **音频流切片**：长音频按静音停顿点后台分段切片，并发发起后台 ASR 转录。
 4. **模型改写**：`pipeline.rs` 拼接转录结果并交由 LLM 处理；改写异常时自动降级回退至原始转录。
@@ -72,6 +73,16 @@ src-tauri/src/              后端（Rust）
 - **终端**：在终端里 `Ctrl+C` 是中断信号，读取选中文本的回退方案在终端中改用 `Ctrl+Insert`；PuTTY / mintty 等改用 `Shift+Insert` 粘贴。
 - **钩子诊断**：设置环境变量 `HOSHIRO_HOOK_TRACE=1` 后启动，日志会记录钩子收到的每个按键事件（不在钩子回调里写日志，不会拖慢输入）。
 - **需要真实桌面的测试**：`cargo test --lib -- --ignored` 会注入真实按键、读写剪贴板、短暂静音、读写凭据管理器，只应在本机交互式桌面上运行。
+
+### Linux 平台说明
+
+- **输入走内核，不走显示服务器**：快捷键从 `/dev/input/event*` 读取（evdev），粘贴快捷键通过 uinput 虚拟键盘「Hoshiro Virtual Keyboard」发送，X11 与各家 Wayland 合成器行为一致。设备权限来自 `src-tauri/linux/70-hoshiro.rules`（`uaccess`），deb / rpm 安装时写入，AppImage 通过 pkexec 安装。
+- **只能监听、不能拦截**：evdev 读不到「吞掉」按键的能力，所以默认快捷键只用修饰键；`Outcome::swallow` 在 Linux 上被忽略。
+- **注入前等用户松开修饰键**：所有键盘设备的修饰键状态会被合并，用户还按着 Super 时发 `Ctrl+V` 会变成 `Super+Ctrl+V`。`linux::wait_modifiers_released` 根据 evdev 看到的物理状态最多等 1.5 秒。
+- **Super / Alt 的松开会被“屏蔽”**：参与快捷键后在虚拟键盘上点一下 `F24`，GNOME 就不会把 Super 的松开当成单击打开活动概览。
+- **XWayland**：`linux::prefer_x11_backend` 在 Wayland 会话里设置 `GDK_BACKEND=x11`，悬浮条才能定位、置顶并用 X 输入形状实现点击穿透；`_NET_ACTIVE_WINDOW` 只能看到 X 窗口。
+- **终端**：粘贴用 `Ctrl+Shift+V`，读取选中文本用 `Ctrl+Shift+C`；xterm 一族改用 `Shift+Insert` 与 PRIMARY 选区。
+- **CI 构建镜像**：Linux 任务在 `ghcr.io/icyblue17/hoshiro-linux-build:22.04` 容器里编译（Ubuntu 22.04 / glibc 2.35 + Tauri 依赖 + Rust + Bun），镜像由 `.github/docker/linux-build.Dockerfile` 经 `linux-image.yml` 每周重建。容器里没有 FUSE，镜像设置了 `APPIMAGE_EXTRACT_AND_RUN=1`。仓库变量 `LINUX_RUNS_ON` 可把任务切到自建 runner（需装 Docker）。
 
 ## 测试与代码规范
 

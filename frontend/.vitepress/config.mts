@@ -10,14 +10,14 @@ export default defineConfig({
   lang: "zh-CN",
   title: "Hoshiro",
   titleTemplate: ":title · Hoshiro",
-  description: "基于 Tauri 2 的开源 macOS / Windows 语音输入法。按住快捷键说话，松开自动将润色后的文本插入光标处。",
+  description: "基于 Tauri 2 的开源 macOS / Windows / Linux 语音输入法。按住快捷键说话，松开自动将润色后的文本插入光标处。",
   cleanUrls: true,
   lastUpdated: true,
   head: [
     ["link", { rel: "icon", type: "image/png", href: `${base}logo.png` }],
     ["meta", { name: "theme-color", content: "#151515" }],
-    ["meta", { property: "og:title", content: "Hoshiro — macOS / Windows 语音输入法" }],
-    ["meta", { property: "og:description", content: "基于 Tauri 2 的开源 macOS / Windows 语音输入法。直连模型服务商，数据完全本地存储。" }],
+    ["meta", { property: "og:title", content: "Hoshiro — macOS / Windows / Linux 语音输入法" }],
+    ["meta", { property: "og:description", content: "基于 Tauri 2 的开源 macOS / Windows / Linux 语音输入法。直连模型服务商，数据完全本地存储。" }],
     ["meta", { property: "og:image", content: `${base}images/home.png` }],
   ],
   themeConfig: {

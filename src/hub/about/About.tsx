@@ -9,7 +9,7 @@ import { updateLabel, useUpdate } from "../update";
 import logo from "../assets/logo.png";
 import licenseText from "../../../LICENSE?raw";
 import data from "./licenses.json";
-import { IS_WINDOWS } from "../../lib/platform";
+import { IS_PC } from "../../lib/platform";
 
 interface Component {
   name: string;
@@ -21,7 +21,7 @@ const RUST = data.rust as Component[];
 const JS = data.js as Component[];
 
 export const REPO_URL = "https://github.com/IcyBlue17/hoshiro";
-export const TAGLINE = IS_WINDOWS ? "按住快捷键说话，松开就是写好的字" : "按住 Fn 说话，松开就是写好的字";
+export const TAGLINE = IS_PC ? "按住快捷键说话，松开就是写好的字" : "按住 Fn 说话，松开就是写好的字";
 
 export function AboutSection() {
   const { version } = useApp();
