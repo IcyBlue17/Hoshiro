@@ -196,23 +196,25 @@ button.chip:active { transform: scale(0.96); }
   line-height: 1.55;
   color: #e8e8ea;
 }
-.answer-body.faded {
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+.answer-body.scroll {
+  --fade-top: 0px;
+  --fade-bottom: 0px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent);
 }
-.answer-body.scroll { overflow-y: auto; overscroll-behavior: contain; }
-.answer-body.scroll::-webkit-scrollbar { width: 6px; }
-.answer-body.scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
-.answer-more {
-  flex: none;
-  align-self: flex-start;
-  margin-top: 6px;
-  height: 20px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #8eb4ff;
+/* 细的浮层式滚动条：平时隐藏，滚动或悬停时浮现 */
+.answer-body.scroll::-webkit-scrollbar { width: 8px; }
+.answer-body.scroll::-webkit-scrollbar-track { background: transparent; }
+.answer-body.scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-clip: padding-box;
+  background-color: transparent;
 }
-.answer-more:hover { color: #b4cdff; }
+.answer-body.scroll:hover::-webkit-scrollbar-thumb { background-color: rgba(255, 255, 255, 0.14); }
+.answer-body.scroll.scrolling::-webkit-scrollbar-thumb { background-color: rgba(255, 255, 255, 0.28); }
 
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
