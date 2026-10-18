@@ -169,22 +169,26 @@ impl Shared {
 
         let phase = (self.phase)(); // before taking the lock: the controller may call into us under its own lock
         let now = self.now_ms();
-        let (actions, swallow, deadline_before, deadline_after) = {
+        let (actions, swallow, deadline_before, deadline_after, was_held, still_held) = {
             let mut m = self.machine.lock();
+            let was_held = m.held_keys().contains(&key);
             let before = m.next_deadline();
             let o = m.handle(KeyEvent { key, down, t_ms: now }, phase);
             if !o.actions.is_empty() || o.swallow {
                 let mut held = m.held_keys().to_vec();
-                if !down {
+                if !down && was_held {
                     held.push(key); // its own release is being processed right now
                 }
                 self.mark_held_alt_win(&held);
             }
-            (o.actions, o.swallow && regular, before, m.next_deadline())
+            (o.actions, o.swallow && regular, before, m.next_deadline(), was_held, !m.held_keys().is_empty())
         };
         if !actions.is_empty() {
             self.send(Msg::Actions(actions));
-        } else if deadline_before != deadline_after {
+        } else if deadline_before != deadline_after || still_held {
+            // Wake the worker whenever keys remain held: otherwise a key-up lost while the worker
+            // slept would leave a phantom key in `held` that resync can never reach (the machine
+            // then rejects every binding forever).
             self.send(Msg::Wake);
         }
         swallow
@@ -212,6 +216,20 @@ impl Shared {
         if vk == 0x0D && kb.flags.0 & LLKHF_EXTENDED.0 != 0 {
             vk = VK_NUMPAD_ENTER;
         }
+        // Remapping tools inject the side-agnostic VKs (VK_SHIFT/CONTROL/MENU): resolve the side
+        // from the scan code / extended flag, or they would land in `held` as unmatchable keys.
+        vk = match vk {
+            0x10 => {
+                if kb.scanCode & 0xFF == 0x36 { 0xA1 } else { 0xA0 } // -> Right/Left Shift
+            }
+            0x11 => {
+                if kb.flags.0 & LLKHF_EXTENDED.0 != 0 { 0xA3 } else { 0xA2 } // -> Right/Left Ctrl
+            }
+            0x12 => {
+                if kb.flags.0 & LLKHF_EXTENDED.0 != 0 { 0xA5 } else { 0xA4 } // -> Right/Left Alt
+            }
+            v => v,
+        };
         // Everything not tagged by us counts as the user's input, including events injected by remapping
         // tools (AutoHotkey, PowerToys) and remote-desktop clients.
         let vkey = VIRTUAL_KEY(vk);
@@ -424,10 +442,20 @@ impl Driver {
         }
 
         let worker_shared = shared.clone();
-        std::thread::Builder::new()
+        if let Err(e) = std::thread::Builder::new()
             .name("hoshiro-hotkey-worker".into())
             .spawn(move || worker_main(worker_shared, rx, on_action))
-            .map_err(|e| anyhow::anyhow!("failed to spawn hotkey worker: {e}"))?;
+        {
+            // Don't leave the hook thread running: its channel is dead and it would swallow keys.
+            let tid = shared.thread_id.load(Ordering::Acquire);
+            if tid != 0 {
+                unsafe {
+                    let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
+                }
+            }
+            let _ = hook_thread.join();
+            anyhow::bail!("failed to spawn hotkey worker: {e}");
+        }
 
         log::info!("hotkey engine started (low-level hooks)");
         Ok(Self { shared, hook_thread: Some(hook_thread) })

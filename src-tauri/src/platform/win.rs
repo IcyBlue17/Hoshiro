@@ -155,9 +155,16 @@ pub fn post_shortcut(mods: &[VIRTUAL_KEY], key: VIRTUAL_KEY) -> anyhow::Result<(
     static SERIAL: Mutex<()> = Mutex::new(());
     let _one_at_a_time = SERIAL.lock();
     INJECTING.store(true, Ordering::Release);
-    let r = post_shortcut_inner(mods, key);
-    end_injection();
-    r
+    // end_injection must run even if the inner work panics, else INJECTING stays true and every
+    // later modifier release is deferred forever.
+    struct InjectionGuard;
+    impl Drop for InjectionGuard {
+        fn drop(&mut self) {
+            end_injection();
+        }
+    }
+    let _guard = InjectionGuard;
+    post_shortcut_inner(mods, key)
 }
 
 fn post_shortcut_inner(mods: &[VIRTUAL_KEY], key: VIRTUAL_KEY) -> anyhow::Result<()> {
