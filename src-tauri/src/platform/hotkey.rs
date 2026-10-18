@@ -206,6 +206,11 @@ mod driver {
             let regular = !is_flags_changed && !is_modifier(key);
 
             if self.capturing.load(Ordering::Acquire) {
+                if code_for_key(key).is_none() && mouse_button_number(key).is_none() && !is_modifier(key) {
+                    // "KeyNN"/"MouseNN" names can't round-trip the binding parser; a combo built
+                    // from them could never fire. Still swallow the event.
+                    return regular;
+                }
                 let report = self.capture.lock().on_key(key, down);
                 if let Some((keys, done)) = report {
                     self.send(Msg::Capture(keys, done));
@@ -418,7 +423,11 @@ mod driver {
         }
 
         pub fn stop_capture(&self) {
-            self.shared.capturing.store(false, Ordering::Release);
+            // Only an active capture may reset the machine: a gratuitous call (the hub window
+            // closing mid-gesture, frontend cleanup after a failed start) must not wipe state.
+            if !self.shared.capturing.swap(false, Ordering::AcqRel) {
+                return;
+            }
             *self.shared.capture_cb.lock() = None;
             self.shared.capture.lock().reset();
             // Keys still physically down at this point would otherwise look like fresh state.

@@ -16,7 +16,9 @@
 //! - Our own uinput keyboard (pastes) is never read.
 
 use super::*;
-use crate::platform::gesture::{is_modifier, key_for_code, mouse_button_name, unknown_key_name, KeyName};
+use crate::platform::gesture::{
+    code_for_key, is_modifier, key_for_code, mouse_button_name, mouse_button_number, unknown_key_name, KeyName,
+};
 use crate::platform::linux::{self, is_alt_or_super, modifier_bit, LISTENING, PHYSICAL_MODS, VIRTUAL_KEYBOARD_NAME};
 use parking_lot::Mutex;
 use std::collections::HashSet;
@@ -103,6 +105,11 @@ impl Shared {
 
     fn process(&self, key: KeyName, down: bool) {
         if self.capturing.load(Ordering::Acquire) {
+            if code_for_key(key).is_none() && mouse_button_number(key).is_none() && !is_modifier(key) {
+                // "KeyNN"/"MouseNN" names can't round-trip the binding parser; a combo built from
+                // them could never fire.
+                return;
+            }
             let report = self.capture.lock().on_key(key, down);
             if down && !is_modifier(key) {
                 self.mask_held_alt_super();
@@ -371,7 +378,11 @@ impl Driver {
     }
 
     pub fn stop_capture(&self) {
-        self.shared.capturing.store(false, Ordering::Release);
+        // Only an active capture may reset the machine: a gratuitous call (the hub window closing
+        // mid-gesture, frontend cleanup after a failed start) must not wipe in-flight state.
+        if !self.shared.capturing.swap(false, Ordering::AcqRel) {
+            return;
+        }
         *self.shared.capture_cb.lock() = None;
         self.shared.capture.lock().reset();
         self.shared.machine.lock().reset();

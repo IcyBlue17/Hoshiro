@@ -475,7 +475,11 @@ impl Driver {
     }
 
     pub fn stop_capture(&self) {
-        self.shared.capturing.store(false, Ordering::Release);
+        // Only an active capture may reset the machine: a gratuitous call (the hub window closing
+        // mid-gesture, frontend cleanup after a failed start) must not wipe in-flight state.
+        if !self.shared.capturing.swap(false, Ordering::AcqRel) {
+            return;
+        }
         *self.shared.capture_cb.lock() = None;
         self.shared.capture.lock().reset();
         self.shared.machine.lock().reset();

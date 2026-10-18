@@ -168,6 +168,9 @@ pub async fn stop_mic_test(state: State<'_, AppState>) -> CmdResult<()> {
 pub async fn start_shortcut_capture(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
     let engine = state.engine.lock();
     let Some(engine) = engine.as_ref() else {
+        #[cfg(target_os = "macos")]
+        return Err("快捷键引擎尚未启动，请先授予「辅助功能」和「输入监控」权限".into());
+        #[cfg(not(target_os = "macos"))]
         return Err("快捷键引擎尚未启动，请稍候再试或重启应用".into());
     };
     let handle = app.clone();
