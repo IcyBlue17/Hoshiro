@@ -37,7 +37,10 @@ export function ShortcutSettings() {
   const recording = rec !== null;
   useEffect(() => {
     if (!recording) return;
-    api.startShortcutCapture().catch(() => {});
+    api.startShortcutCapture().catch((e) => {
+      const r = recRef.current;
+      if (r) setError({ feature: r.feature, text: typeof e === "string" ? e : String(e) });
+    });
     return () => {
       api.stopShortcutCapture().catch(() => {});
     };

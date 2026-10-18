@@ -100,7 +100,10 @@ pub fn spawn(app: &AppHandle) -> UnboundedSender<Cmd> {
     };
     tauri::async_runtime::spawn(async move {
         while let Some(cmd) = rx.recv().await {
-            ctl.handle(cmd).await;
+            // A panic here must not kill the loop: every later hotkey action would be silently dropped.
+            if AssertUnwindSafe(ctl.handle(cmd)).catch_unwind().await.is_err() {
+                log::error!("controller: panic while handling a command");
+            }
         }
         log::warn!("controller loop ended");
     });
@@ -365,7 +368,10 @@ impl Controller {
         });
 
         let chunks: ChunkList = Arc::new(Mutex::new(Vec::new()));
-        let words = self.app.state::<AppState>().db.words_for_prompt(100).unwrap_or_default();
+        let db = self.app.state::<AppState>().db.clone();
+        let words = tauri::async_runtime::spawn_blocking(move || db.words_for_prompt(100).unwrap_or_default())
+            .await
+            .unwrap_or_default();
         let stream = Arc::new(Mutex::new(None));
         if settings.asr.streaming() {
             let (tx, task) = crate::providers::streaming::start(settings.asr.clone(), settings.selected_languages.clone(), words.clone());

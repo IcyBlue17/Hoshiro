@@ -275,7 +275,7 @@ pub fn run() {
             // Closing the hub destroys it (frees the webview); `notify::show_main` recreates it.
             if let WindowEvent::Destroyed = event {
                 if window.label() == "main" {
-                    notify::main_closed();
+                    notify::main_closed(&window.app_handle());
                 }
             }
         })

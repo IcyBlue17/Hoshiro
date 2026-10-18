@@ -231,9 +231,14 @@ fn create_main(app: &AppHandle) -> Option<WebviewWindow> {
 }
 
 /// Called when the hub window is destroyed.
-pub fn main_closed() {
+pub fn main_closed(app: &AppHandle) {
     HUB_READY.store(false, Ordering::SeqCst);
     *PENDING_ROUTE.lock() = None;
+    // A shortcut capture must not outlive the hub that started it: capture mode swallows every key,
+    // and with the webview gone its events would go nowhere while all hotkeys stay dead.
+    if let Some(engine) = app.state::<AppState>().engine.lock().as_ref() {
+        engine.0.stop_capture();
+    }
 }
 
 /// Frontend handshake: marks the hub ready and returns any route requested before it was.

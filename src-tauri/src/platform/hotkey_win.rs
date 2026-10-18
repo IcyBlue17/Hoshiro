@@ -12,11 +12,12 @@
 
 use super::*;
 use crate::platform::gesture::{
-    code_for_key, is_modifier, key_for_code, mouse_button_name, unknown_key_name, KeyName, VK_NUMPAD_ENTER,
+    code_for_key, is_modifier, key_for_code, mouse_button_name, mouse_button_number, unknown_key_name, KeyName,
+    VK_NUMPAD_ENTER,
 };
 use crate::platform::win::{
-    is_alt_or_win, key_down_now, key_input, modifier_bit, send_inputs, HOOK_RUNNING, MASK_ON_RELEASE, PHYSICAL_MODS,
-    SYNTH_MAGIC, VK_MASK,
+    is_alt_or_win, key_down_now, key_input, modifier_bit, send_inputs, HOOK_RUNNING, MASK_ON_RELEASE, MODIFIERS,
+    PHYSICAL_MODS, SYNTH_MAGIC, VK_MASK,
 };
 use parking_lot::{Mutex, RwLock};
 use std::panic::AssertUnwindSafe;
@@ -76,6 +77,50 @@ fn vk_of(name: &str) -> Option<VIRTUAL_KEY> {
     code_for_key(name).map(VIRTUAL_KEY)
 }
 
+/// The virtual key to poll with GetAsyncKeyState for a held key name, including the "KeyNN"/"MouseNN"
+/// names invented for unmappable events. Numpad Enter polls as VK_RETURN (the up we check only
+/// cares that some Enter is still down).
+fn async_vk(key: KeyName) -> Option<VIRTUAL_KEY> {
+    if let Some(c) = code_for_key(key) {
+        return Some(VIRTUAL_KEY(if c == VK_NUMPAD_ENTER { 0x0D } else { c }));
+    }
+    if let Some(b) = mouse_button_number(key) {
+        return Some(VIRTUAL_KEY(match b {
+            2 => 0x04, // VK_MBUTTON
+            3 => 0x05, // VK_XBUTTON1
+            4 => 0x06, // VK_XBUTTON2
+            _ => return None,
+        }));
+    }
+    if let Some(id) = key.strip_prefix("Key").and_then(|s| s.parse::<u16>().ok()) {
+        return (id <= 0xFF).then_some(VIRTUAL_KEY(id));
+    }
+    if let Some(n) = key.strip_prefix("Mouse").and_then(|s| s.parse::<i64>().ok()) {
+        // Unknown "MouseNN" names are button+1, matching `mouse_button_name`'s numbering.
+        return match n - 1 {
+            2 => Some(VIRTUAL_KEY(0x04)),
+            3 => Some(VIRTUAL_KEY(0x05)),
+            4 => Some(VIRTUAL_KEY(0x06)),
+            _ => None,
+        };
+    }
+    None
+}
+
+/// PHYSICAL_MODS mirrors what the hook saw; (re)seed it from the async key state so `physically_down`
+/// callers never act on bits a dead hook left behind.
+fn seed_physical_mods() {
+    let mut bits = 0;
+    for m in MODIFIERS {
+        if key_down_now(*m) {
+            if let Some(b) = modifier_bit(*m) {
+                bits |= b;
+            }
+        }
+    }
+    PHYSICAL_MODS.store(bits, Ordering::Release);
+}
+
 impl Shared {
     fn now_ms(&self) -> u64 {
         self.epoch.elapsed().as_millis() as u64
@@ -102,6 +147,11 @@ impl Shared {
         let regular = !is_modifier(key);
 
         if self.capturing.load(Ordering::Acquire) {
+            if code_for_key(key).is_none() && mouse_button_number(key).is_none() && !is_modifier(key) {
+                // "KeyNN"/"MouseNN" names don't survive the binding parser, so letting them into a
+                // combo would record a shortcut that can never fire. Still swallow the event.
+                return regular;
+            }
             let report = {
                 let mut c = self.capture.lock();
                 let r = c.on_key(key, down);
@@ -212,22 +262,24 @@ impl Shared {
         self.process(key, down)
     }
 
-    /// Hooks can lose events (timeouts, secure desktop, UAC prompts): release held modifiers that the async
-    /// key state has reported as up on two consecutive checks.
-    fn resync(&self) {
+    /// Hooks can lose events (timeouts, secure desktop, UAC prompts): release held keys that the async
+    /// key state reports as up. A missed release must disagree on two consecutive checks, except with
+    /// `force` — used when the queue has been quiet for seconds, where a disagreement cannot be an
+    /// in-flight event. Keys whose name can't map to a vk can't be polled; they are released too,
+    /// because an unverifiable stuck key permanently wedges the engine and the periodic re-install.
+    fn resync(&self, force: bool) {
         if self.capturing.load(Ordering::Acquire) {
             return;
         }
-        let held = self.machine.lock().held_modifiers();
+        let held = self.machine.lock().held_keys().to_vec();
         let mut suspects = self.suspects.lock();
         let mut released = Vec::new();
         let mut next = Vec::new();
         for k in held {
-            let Some(vk) = vk_of(k) else { continue };
-            if key_down_now(vk) {
+            if async_vk(k).is_some_and(key_down_now) {
                 continue;
             }
-            if suspects.contains(&k) {
+            if force || suspects.contains(&k) {
                 released.push(k);
             } else {
                 next.push(k);
@@ -357,7 +409,18 @@ impl Driver {
                 let _ = hook_thread.join();
                 anyhow::bail!(e);
             }
-            Err(_) => anyhow::bail!("timed out installing the keyboard hook"),
+            Err(_) => {
+                // The hook thread may still come up: make sure it quits instead of installing hooks
+                // that feed a dead channel (keys would be swallowed into the void).
+                let tid = shared.thread_id.load(Ordering::Acquire);
+                if tid != 0 {
+                    unsafe {
+                        let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
+                    }
+                }
+                let _ = hook_thread.join();
+                anyhow::bail!("timed out installing the keyboard hook");
+            }
         }
 
         let worker_shared = shared.clone();
@@ -421,13 +484,19 @@ fn hook_thread_main(shared: Arc<Shared>, ready: Sender<Result<(), String>>) {
     let mut hooks = match install_hooks() {
         Ok(h) => h,
         Err(e) => {
-            *CURRENT.write() = None;
+            {
+                // Only clear CURRENT if it is still ours — a newer driver may have already replaced it.
+                let mut cur = CURRENT.write();
+                if cur.as_ref().is_some_and(|c| Arc::ptr_eq(c, &shared)) {
+                    *cur = None;
+                }
+            }
             let _ = ready.send(Err(format!("{e:#}")));
             return;
         }
     };
     HOOK_RUNNING.store(true, Ordering::Release);
-    PHYSICAL_MODS.store(0, Ordering::Release);
+    seed_physical_mods();
     shared.active.store(true, Ordering::Release);
     let _ = ready.send(Ok(()));
 
@@ -447,14 +516,20 @@ fn hook_thread_main(shared: Arc<Shared>, ready: Sender<Result<(), String>>) {
                 }
             }
             WM_TIMER => {
-                // Re-install only when idle and quiet for a while, so no key event can fall between the hooks.
-                let idle = (shared.phase)() == SessionPhase::Idle
-                    && shared.machine.lock().held_keys().is_empty()
+                // A silent hook removal or a lost event can leave keys stuck in `held`, which would
+                // otherwise keep the re-install from ever running (the engine then dies permanently).
+                // Force-release anything the async key state calls "up", then re-install only when
+                // nothing is held, so no key event can fall between the hooks.
+                shared.resync(true);
+                let idle = shared.machine.lock().held_keys().is_empty()
                     && !shared.capturing.load(Ordering::Acquire)
                     && shared.now_ms().saturating_sub(shared.last_event_ms.load(Ordering::Relaxed)) > 5_000;
                 if idle {
                     match install_hooks() {
-                        Ok(fresh) => remove_hooks(std::mem::replace(&mut hooks, fresh)),
+                        Ok(fresh) => {
+                            remove_hooks(std::mem::replace(&mut hooks, fresh));
+                            seed_physical_mods();
+                        }
                         Err(e) => log::warn!("re-installing hooks failed: {e:#}"),
                     }
                 }
@@ -495,7 +570,7 @@ fn worker_main(shared: Arc<Shared>, rx: Receiver<Msg>, on_action: ActionCallback
     loop {
         let (deadline, holding) = {
             let m = shared.machine.lock();
-            (m.next_deadline(), !m.held_modifiers().is_empty())
+            (m.next_deadline(), !m.held_keys().is_empty())
         };
         let mut wait = match deadline {
             Some(d) => Duration::from_millis(d.saturating_sub(shared.now_ms())),
@@ -523,7 +598,7 @@ fn worker_main(shared: Arc<Shared>, rx: Receiver<Msg>, on_action: ActionCallback
                 let actions = shared.machine.lock().on_timer(now, phase);
                 dispatch(actions);
                 if holding {
-                    shared.resync();
+                    shared.resync(false);
                 }
             }
         }

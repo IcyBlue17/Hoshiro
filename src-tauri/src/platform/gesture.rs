@@ -486,8 +486,7 @@ impl GestureMachine {
         self.translation = compile(&b.translation, "translation");
         self.paste_last = compile(&b.paste_last_transcript, "pasteLastTranscript");
         self.toggle = b.trigger == TriggerMode::Toggle;
-        self.ptt = None;
-        self.pending_tap = None;
+        self.reset();
     }
 
     /// Forget all input state (tap re-enabled, capture mode entered, ...). Bindings are kept.
@@ -692,7 +691,17 @@ impl GestureMachine {
                     self.swallow_if_regular(key, out);
                 }
                 Found::Blocked => self.swallow_if_regular(key, out),
-                Found::None => {}
+                Found::None => {
+                    // A mode combo completing inside the window switches the pending recording
+                    // instead of being silently ignored until the tap times out.
+                    if let Some((mode, _)) = self.mode_combo(key) {
+                        self.pending_tap = None;
+                        self.mode = mode;
+                        self.assume(SessionPhase::RecordingLocked, t);
+                        out.actions.push(HotkeyAction::SwitchMode { mode });
+                        self.swallow_if_regular(key, out);
+                    }
+                }
             }
             return;
         }
