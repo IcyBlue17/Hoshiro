@@ -63,7 +63,7 @@ struct Shared {
     thread_id: AtomicU32,
     active: AtomicBool,
     last_event_ms: AtomicU64,
-    /// Held modifiers that the async key state already reported as released once (confirmed on the next check).
+    /// Held keys that the async key state already reported as released once (confirmed on the next check).
     suspects: Mutex<Vec<KeyName>>,
 }
 
@@ -112,8 +112,8 @@ fn async_vk(key: KeyName) -> Option<VIRTUAL_KEY> {
 fn seed_physical_mods() {
     let mut bits = 0;
     for m in MODIFIERS {
-        if key_down_now(*m) {
-            if let Some(b) = modifier_bit(*m) {
+        if key_down_now(m) {
+            if let Some(b) = modifier_bit(m) {
                 bits |= b;
             }
         }
@@ -169,7 +169,7 @@ impl Shared {
 
         let phase = (self.phase)(); // before taking the lock: the controller may call into us under its own lock
         let now = self.now_ms();
-        let (actions, swallow, deadline_before, deadline_after, was_held, still_held) = {
+        let (actions, swallow, deadline_before, deadline_after, still_held) = {
             let mut m = self.machine.lock();
             let was_held = m.held_keys().contains(&key);
             let before = m.next_deadline();
@@ -181,7 +181,7 @@ impl Shared {
                 }
                 self.mark_held_alt_win(&held);
             }
-            (o.actions, o.swallow && regular, before, m.next_deadline(), was_held, !m.held_keys().is_empty())
+            (o.actions, o.swallow && regular, before, m.next_deadline(), !m.held_keys().is_empty())
         };
         if !actions.is_empty() {
             self.send(Msg::Actions(actions));
@@ -526,7 +526,19 @@ fn hook_thread_main(shared: Arc<Shared>, ready: Sender<Result<(), String>>) {
     HOOK_RUNNING.store(true, Ordering::Release);
     seed_physical_mods();
     shared.active.store(true, Ordering::Release);
-    let _ = ready.send(Ok(()));
+    if ready.send(Ok(())).is_err() {
+        // The caller timed out and gave up: leave no live hooks feeding a dead engine.
+        shared.active.store(false, Ordering::Release);
+        remove_hooks(hooks);
+        {
+            let mut cur = CURRENT.write();
+            if cur.as_ref().is_some_and(|c| Arc::ptr_eq(c, &shared)) {
+                *cur = None;
+            }
+        }
+        HOOK_RUNNING.store(false, Ordering::Release);
+        return;
+    }
 
     let timer = unsafe { SetTimer(None, 0, REINSTALL_EVERY.as_millis() as u32, None) };
     let mut msg = MSG::default();

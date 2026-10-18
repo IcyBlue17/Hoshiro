@@ -352,11 +352,15 @@ impl Recorder {
         let session = self.inner.lock().take().ok_or_else(|| anyhow!("not recording"))?;
         let _ = session.stop_stream.send(());
         // A wedged stream thread (hung audio engine, unplugged device) must not hang the caller.
-        join_bounded(session.stream_thread, Duration::from_secs(3));
+        if !join_bounded(session.stream_thread, Duration::from_secs(3)) {
+            log::warn!("mic stream thread did not stop in 3s; detaching");
+        }
         let (tx, rx) = mpsc::channel();
         session.msg_tx.send(Msg::Finish(tx)).map_err(|_| anyhow!("audio worker gone"))?;
         let result = rx.recv_timeout(Duration::from_secs(10)).map_err(|_| anyhow!("audio worker did not finish"))?;
-        join_bounded(session.worker, Duration::from_secs(3));
+        if !join_bounded(session.worker, Duration::from_secs(3)) {
+            log::warn!("audio worker did not stop in 3s; detaching");
+        }
         Ok(result)
     }
 
@@ -402,7 +406,12 @@ fn shutdown(session: Session, discard: bool) {
     if discard {
         let _ = session.msg_tx.send(Msg::Cancel);
     }
-    join_bounded(session.worker, Duration::from_secs(5));
+    // Dropping the sender ends the worker's recv loop even when nothing was sent, so the join
+    // below cannot burn its whole timeout on a healthy worker.
+    drop(session.msg_tx);
+    if !join_bounded(session.worker, Duration::from_secs(5)) {
+        log::warn!("audio worker did not stop in 5s; detaching");
+    }
 }
 
 fn worker_main(rate: u32, sink: Arc<dyn RecorderSink>, rx: Receiver<Msg>, failed: Arc<AtomicBool>) {

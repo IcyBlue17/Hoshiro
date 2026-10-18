@@ -1069,6 +1069,21 @@ mod tests {
     }
 
     #[test]
+    fn pending_tap_disjoint_mode_combo_switches() {
+        // Dictation Fn, ask LeftCtrl+Space (no shared keys): completing the ask combo inside the
+        // double-press window switches the pending recording instead of being ignored.
+        let mut s = Sim::new(&bindings(&["Fn"], &["LeftCtrl+Space"], &[], &[]));
+        s.down("Fn", 0);
+        s.up("Fn", 80); // tap -> pending_tap window
+        s.down("LeftCtrl", 100);
+        let o = s.down("Space", 30);
+        assert_eq!(o.actions, vec![HotkeyAction::SwitchMode { mode: Mode::Ask }]);
+        assert!(o.swallow);
+        assert_eq!(s.phase, RecordingLocked);
+        assert!(s.advance(1000).is_empty(), "pending tap deadline must be gone");
+    }
+
+    #[test]
     fn locked_dictation_key_finishes() {
         let mut s = Sim::default();
         s.down("Fn", 0);
@@ -1361,6 +1376,20 @@ mod tests {
         m.handle(KeyEvent { key: "Fn", down: true, t_ms: 0 }, Idle);
         let o = m.handle(KeyEvent { key: "Fn", down: false, t_ms: 5_000_000 }, Processing);
         assert!(o.actions.is_empty());
+    }
+
+    #[test]
+    fn set_bindings_resets_held_state() {
+        let mut s = Sim::new(&bindings(&["Help"], &[], &[], &[]));
+        s.down("Help", 0); // swallowed regular dictation key, recording starts
+        assert_eq!(s.phase, RecordingPtt);
+        // A settings save mid-hold must not keep stale held/swallowed state behind.
+        s.m.set_bindings(&bindings(&["Fn"], &[], &[], &[]));
+        assert!(s.m.held_keys().is_empty());
+        assert_eq!(s.m.next_deadline(), None);
+        s.phase = Idle;
+        assert!(s.up("Help", 50).actions.is_empty(), "stale release must be inert");
+        assert_eq!(s.down("Fn", 50).actions, start(Mode::Dictation, false));
     }
 
     #[test]
