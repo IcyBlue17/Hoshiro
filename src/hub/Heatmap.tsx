@@ -12,6 +12,7 @@ interface Cell {
   key: string;
   date: Date;
   words: number;
+  sessions: number;
   kind: "future" | "nodata" | "none" | "level";
   level: number;
 }
@@ -49,15 +50,16 @@ export function Heatmap({ days }: { days: HeatmapDay[] }) {
         const key = localDateKey(date);
         const rec = byDate.get(key);
         const words = rec?.words ?? 0;
+        const sessions = rec?.sessions ?? 0;
         let kind: Cell["kind"] = "none";
         let level = 0;
         if (key > todayKey) kind = "future";
         else if (first === null || key < first) kind = "nodata";
-        else if (words > 0) {
+        else if (words > 0 || sessions > 0) {
           kind = "level";
-          level = Math.min(4, Math.max(1, Math.ceil((words / (max || 1)) * 4)));
+          level = words > 0 ? Math.min(4, Math.max(1, Math.ceil((words / (max || 1)) * 4))) : 1;
         }
-        col.push({ key, date, words, kind, level });
+        col.push({ key, date, words, sessions, kind, level });
       }
       cols.push(col);
     }
@@ -131,7 +133,11 @@ export function Heatmap({ days }: { days: HeatmapDay[] }) {
             {tip.date.getFullYear()}年{tip.date.getMonth() + 1}月{tip.date.getDate()}日
           </b>
           <span>
-            {tip.kind === "level" ? `${tip.words.toLocaleString()} 字 · ${tipText}` : tipText}
+            {tip.kind === "level"
+              ? tip.words > 0
+                ? `${tip.words.toLocaleString()} 字 · ${tipText}`
+                : `${tip.sessions} 次会话`
+              : tipText}
           </span>
         </div>
       )}

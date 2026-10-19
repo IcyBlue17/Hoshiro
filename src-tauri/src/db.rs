@@ -1,15 +1,15 @@
 //! SQLite storage: history + dictionary. All access goes through one mutex-guarded connection;
 //! call from `spawn_blocking` in async contexts.
 
-use crate::stats::StatRow;
+use crate::stats::DayRow;
 use crate::types::{DictionaryWord, HistoryItem, HistoryQuery, Mode};
 use anyhow::Context;
-use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, SecondsFormat, Utc};
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::path::{Path, PathBuf};
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -194,6 +194,39 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
         )?;
         version = 3;
     }
+    if version < 4 {
+        // Per-day aggregates that outlive history retention, plus a marker table so each
+        // completed session is counted exactly once (retries adjust by delta instead).
+        conn.execute_batch(
+            "BEGIN;
+            CREATE TABLE daily_stats (
+                day TEXT PRIMARY KEY,
+                words INTEGER NOT NULL DEFAULT 0,
+                secs REAL NOT NULL DEFAULT 0,
+                sessions INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE counted_sessions (
+                history_id TEXT PRIMARY KEY,
+                day TEXT NOT NULL,
+                words INTEGER NOT NULL DEFAULT 0,
+                secs REAL NOT NULL DEFAULT 0
+            );
+            INSERT INTO counted_sessions(history_id, day, words, secs)
+                SELECT id, d, words, duration_secs FROM (
+                    SELECT id, date(created_at, 'localtime') AS d, words, duration_secs
+                    FROM history WHERE status = 'completed'
+                ) WHERE d IS NOT NULL;
+            INSERT OR REPLACE INTO daily_stats(day, words, secs, sessions)
+                SELECT day, SUM(words), SUM(secs), COUNT(*) FROM counted_sessions GROUP BY day;
+            INSERT OR IGNORE INTO daily_stats(day, words, secs, sessions)
+                SELECT d, 0, SUM(audio_secs), SUM(audio_secs > 0) FROM (
+                    SELECT date(created_at, 'localtime') AS d, audio_secs FROM usage
+                ) WHERE d IS NOT NULL GROUP BY d;
+            PRAGMA user_version = 4;
+            COMMIT;",
+        )?;
+        version = 4;
+    }
     debug_assert_eq!(version, SCHEMA_VERSION);
     Ok(())
 }
@@ -359,15 +392,19 @@ impl Db {
         )?)
     }
 
-    pub fn stat_rows(&self) -> anyhow::Result<Vec<StatRow>> {
+    /// Per-day aggregates for the home stats. These survive history retention.
+    pub fn stat_rows(&self) -> anyhow::Result<Vec<DayRow>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare("SELECT created_at, duration_secs, words FROM history WHERE status = 'completed'")?;
+        let mut stmt = conn.prepare("SELECT day, secs, words, sessions FROM daily_stats")?;
         let rows = stmt.query_map([], |r| {
-            Ok(StatRow {
-                created_at: r.get(0)?,
-                duration_secs: r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
-                words: r.get::<_, Option<i64>>(2)?.unwrap_or(0).max(0) as u32,
-            })
+            let day = NaiveDate::parse_from_str(&r.get::<_, String>(0)?, "%Y-%m-%d")
+                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into()))?;
+            Ok((
+                day,
+                r.get::<_, f64>(1)?,
+                r.get::<_, i64>(2)?.max(0) as u32,
+                r.get::<_, i64>(3)?.max(0) as u32,
+            ))
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
@@ -652,6 +689,61 @@ fn collect_audio(conn: &Connection, sql: &str, p: impl rusqlite::Params) -> anyh
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Add `words`/`secs`/`sessions` to a day's aggregate, clamped at zero.
+fn bump_day(conn: &Connection, day: &str, words: i64, secs: f64, sessions: i64) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO daily_stats(day, words, secs, sessions) VALUES(?1, MAX(0, ?2), MAX(0.0, ?3), MAX(0, ?4))
+         ON CONFLICT(day) DO UPDATE SET words = MAX(0, words + ?2), secs = MAX(0.0, secs + ?3), sessions = MAX(0, sessions + ?4)",
+        params![day, words, secs, sessions],
+    )?;
+    Ok(())
+}
+
+fn local_day(ts: &str) -> Option<String> {
+    DateTime::parse_from_rfc3339(ts)
+        .ok()
+        .map(|d| d.with_timezone(&chrono::Local).date_naive().to_string())
+}
+
+/// Count a completed session in `daily_stats` exactly once per history id. A retry that
+/// rewrites the same row adjusts the day by the delta; a moved day is rebalanced.
+fn record_completed(conn: &Connection, row: &HistoryRow) -> anyhow::Result<()> {
+    if row.status != "completed" {
+        return Ok(());
+    }
+    let Some(day) = local_day(&row.created_at) else { return Ok(()) };
+    let prev = conn
+        .query_row(
+            "SELECT day, words, secs FROM counted_sessions WHERE history_id = ?1",
+            params![row.id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, f64>(2)?)),
+        )
+        .optional()?;
+    let (words, secs) = (row.words as i64, row.duration_secs);
+    match prev {
+        None => {
+            conn.execute(
+                "INSERT INTO counted_sessions(history_id, day, words, secs) VALUES(?1, ?2, ?3, ?4)",
+                params![row.id, day, words, secs],
+            )?;
+            bump_day(conn, &day, words, secs, 1)?;
+        }
+        Some((pday, pw, ps)) => {
+            conn.execute(
+                "UPDATE counted_sessions SET day = ?2, words = ?3, secs = ?4 WHERE history_id = ?1",
+                params![row.id, day, words, secs],
+            )?;
+            if pday == day {
+                bump_day(conn, &day, words - pw, secs - ps, 0)?;
+            } else {
+                bump_day(conn, &pday, -pw, -ps, -1)?;
+                bump_day(conn, &day, words, secs, 1)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn upsert(conn: &Connection, row: &HistoryRow) -> anyhow::Result<()> {
     conn.execute(
         &format!(
@@ -686,6 +778,7 @@ fn upsert(conn: &Connection, row: &HistoryRow) -> anyhow::Result<()> {
             row.llm_model,
         ],
     )?;
+    record_completed(conn, row)?;
     Ok(())
 }
 
@@ -754,11 +847,13 @@ mod tests {
     #[test]
     fn upgrades_v1_without_losing_rows() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("CREATE TABLE history(id TEXT PRIMARY KEY); INSERT INTO history VALUES('old'); PRAGMA user_version=1;").unwrap();
+        conn.execute_batch("CREATE TABLE history(id TEXT PRIMARY KEY, created_at TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL, raw_text TEXT, refined_text TEXT, selected_text TEXT, duration_secs REAL NOT NULL DEFAULT 0, app_name TEXT, bundle_id TEXT, window_title TEXT, error_message TEXT, audio_path TEXT, source TEXT NOT NULL DEFAULT 'hoshiro', words INTEGER NOT NULL DEFAULT 0);
+            INSERT INTO history(id,created_at,mode,status,words) VALUES('old','2026-01-01T00:00:00.000Z','dictation','completed',7);
+            PRAGMA user_version=1;").unwrap();
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM history", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+        assert_eq!(conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 4);
     }
 
     #[test]
@@ -772,7 +867,7 @@ mod tests {
             PRAGMA user_version=2;").unwrap();
         migrate(&v2).unwrap();
         migrate(&v2).unwrap();
-        assert_eq!(v2.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+        assert_eq!(v2.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 4);
         let (w, t, a): (i64, Option<i64>, Option<String>) = v2.query_row("SELECT words,total_ms,asr_provider FROM history WHERE id='old'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
         assert_eq!((w, t, a), (7, None, None));
         assert_eq!(v2.query_row("SELECT input_tokens FROM usage", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
@@ -959,6 +1054,50 @@ mod tests {
         assert_eq!((i, s), (1, 1));
         assert_eq!(db.get_history("a").unwrap().unwrap().refined_text.as_deref(), Some("one"));
         assert_eq!(db.stat_rows().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn daily_stats_survive_purge_and_count_once() {
+        let dir = tmp_dir();
+        let db = Db::open_in_memory(dir.clone()).unwrap();
+        let old_ts = (Utc::now() - chrono::Duration::days(40)).to_rfc3339_opts(SecondsFormat::Millis, true);
+        let mut a = row("a", Mode::Dictation, "completed", "你好世界", &old_ts);
+        a.duration_secs = 10.0;
+        db.upsert_history(&a).unwrap();
+        db.upsert_history(&a).unwrap(); // re-persist must not double count
+        // Retry with the same id adjusts the day by delta rather than re-adding.
+        a.words = 12;
+        a.duration_secs = 14.0;
+        db.upsert_history(&a).unwrap();
+        db.upsert_history(&row("b", Mode::Dictation, "completed", "today", &now_ts())).unwrap();
+        db.upsert_history(&row("e", Mode::Dictation, "error", "x", &now_ts())).unwrap();
+
+        let rows = db.stat_rows().unwrap();
+        assert_eq!(rows.len(), 2);
+        let old_day = DateTime::parse_from_rfc3339(&old_ts).unwrap().with_timezone(&chrono::Local).date_naive();
+        let old = rows.iter().find(|r| r.0 == old_day).unwrap();
+        assert_eq!((old.2, old.3), (12, 1));
+        assert!((old.1 - 14.0).abs() < 1e-9);
+
+        // Deleting all history leaves the aggregates intact.
+        db.delete_all_history().unwrap();
+        assert_eq!(db.count_history().unwrap(), 0);
+        assert_eq!(db.stat_rows().unwrap().len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn usage_backfills_days_without_history() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE history(id TEXT PRIMARY KEY, created_at TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL, raw_text TEXT, refined_text TEXT, selected_text TEXT, duration_secs REAL NOT NULL DEFAULT 0, app_name TEXT, bundle_id TEXT, window_title TEXT, error_message TEXT, audio_path TEXT, source TEXT NOT NULL DEFAULT 'hoshiro', words INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE usage (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER, output_tokens INTEGER, audio_secs REAL NOT NULL DEFAULT 0);
+            INSERT INTO usage(created_at,provider,model,audio_secs) VALUES('2026-10-01T02:00:00.000Z','MiMo','asr',5.0),('2026-10-01T02:00:01.000Z','Gemini','m',0.0);
+            PRAGMA user_version=3;").unwrap();
+        migrate(&conn).unwrap();
+        let (w, s, n): (i64, f64, i64) =
+            conn.query_row("SELECT words, secs, sessions FROM daily_stats", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((w, n), (0, 1)); // only the ASR call counts as a session
+        assert!(s >= 5.0);
     }
 
     #[test]

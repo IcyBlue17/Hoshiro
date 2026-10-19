@@ -1,7 +1,7 @@
 //! Word counting and usage statistics.
 
 use crate::types::{HeatmapDay, Stats};
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
+use chrono::{Datelike, Duration, NaiveDate};
 use std::collections::BTreeMap;
 
 fn is_cjk(c: char) -> bool {
@@ -39,40 +39,21 @@ pub fn count_words(text: &str) -> u32 {
     count
 }
 
-#[derive(Clone, Debug)]
-pub struct StatRow {
-    /// RFC 3339 timestamp.
-    pub created_at: String,
-    pub duration_secs: f64,
-    pub words: u32,
-}
-
-/// (local date, duration, words)
-type DayRow = (NaiveDate, f64, u32);
-
-pub fn compute(rows: &[StatRow], today: NaiveDate) -> Stats {
-    let day_rows: Vec<DayRow> = rows
-        .iter()
-        .filter_map(|r| {
-            let dt = DateTime::parse_from_rfc3339(&r.created_at).ok()?;
-            Some((dt.with_timezone(&Local).date_naive(), r.duration_secs, r.words))
-        })
-        .collect();
-    compute_days(&day_rows, today)
-}
+/// (local date, dictation secs, words, sessions)
+pub type DayRow = (NaiveDate, f64, u32, u32);
 
 pub fn compute_days(rows: &[DayRow], today: NaiveDate) -> Stats {
     let mut total_words = 0u64;
     let mut total_secs = 0f64;
     let mut per_day: BTreeMap<NaiveDate, (u64, u64)> = BTreeMap::new();
-    for (date, secs, words) in rows {
+    for (date, secs, words, sessions) in rows {
         total_words += *words as u64;
         if secs.is_finite() && *secs > 0.0 {
             total_secs += *secs;
         }
         let e = per_day.entry(*date).or_default();
         e.0 += *words as u64;
-        e.1 += 1;
+        e.1 += *sessions as u64;
     }
 
     let average_wpm = if total_secs > 0.0 { total_words as f64 / (total_secs / 60.0) } else { 0.0 };
@@ -148,7 +129,7 @@ mod tests {
     #[test]
     fn totals_and_wpm() {
         let today = d(2026, 10, 10);
-        let rows = vec![(today, 30.0, 100u32), (today, 30.0, 20u32)];
+        let rows = vec![(today, 30.0, 100u32, 1u32), (today, 30.0, 20u32, 1)];
         let s = compute_days(&rows, today);
         assert_eq!(s.total_words, 120);
         assert_eq!(s.total_dictation_secs, 60.0);
@@ -172,7 +153,7 @@ mod tests {
     #[test]
     fn time_saved_never_negative() {
         let today = d(2026, 10, 10);
-        let s = compute_days(&[(today, 600.0, 10)], today);
+        let s = compute_days(&[(today, 600.0, 10, 1)], today);
         assert_eq!(s.time_saved_secs, 0.0);
     }
 
@@ -180,14 +161,14 @@ mod tests {
     fn streaks() {
         let today = d(2026, 10, 10);
         let rows = vec![
-            (d(2026, 10, 10), 1.0, 1u32),
-            (d(2026, 10, 9), 1.0, 1),
-            (d(2026, 10, 8), 1.0, 1),
-            (d(2026, 10, 5), 1.0, 1),
-            (d(2026, 10, 4), 1.0, 1),
-            (d(2026, 10, 3), 1.0, 1),
-            (d(2026, 10, 2), 1.0, 1),
-            (d(2026, 9, 30), 1.0, 1),
+            (d(2026, 10, 10), 1.0, 1u32, 1u32),
+            (d(2026, 10, 9), 1.0, 1, 1),
+            (d(2026, 10, 8), 1.0, 1, 1),
+            (d(2026, 10, 5), 1.0, 1, 1),
+            (d(2026, 10, 4), 1.0, 1, 1),
+            (d(2026, 10, 3), 1.0, 1, 1),
+            (d(2026, 10, 2), 1.0, 1, 1),
+            (d(2026, 9, 30), 1.0, 1, 1),
         ];
         let s = compute_days(&rows, today);
         assert_eq!(s.current_streak, 3);
@@ -198,21 +179,21 @@ mod tests {
     #[test]
     fn current_streak_counts_from_yesterday() {
         let today = d(2026, 10, 10);
-        let rows = vec![(d(2026, 10, 9), 1.0, 1u32), (d(2026, 10, 8), 1.0, 1)];
+        let rows = vec![(d(2026, 10, 9), 1.0, 1u32, 1u32), (d(2026, 10, 8), 1.0, 1, 1)];
         assert_eq!(compute_days(&rows, today).current_streak, 2);
-        let rows = vec![(d(2026, 10, 7), 1.0, 1u32)];
+        let rows = vec![(d(2026, 10, 7), 1.0, 1u32, 1)];
         assert_eq!(compute_days(&rows, today).current_streak, 0);
     }
 
     #[test]
     fn heatmap_shape() {
         let today = d(2026, 10, 10); // Saturday
-        let s = compute_days(&[(today, 5.0, 7)], today);
+        let s = compute_days(&[(today, 5.0, 7, 3)], today);
         assert_eq!(s.heatmap.len(), 52 * 7 + 7);
         assert_eq!(s.heatmap.first().unwrap().date, "2025-10-05"); // a Sunday
         let last = s.heatmap.last().unwrap();
         assert_eq!(last.date, "2026-10-10");
         assert_eq!(last.words, 7);
-        assert_eq!(last.sessions, 1);
+        assert_eq!(last.sessions, 3);
     }
 }

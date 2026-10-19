@@ -410,7 +410,7 @@ pub async fn preview_dictionary_csv(path: String) -> CmdResult<Vec<String>> {
 pub async fn get_stats(state: State<'_, AppState>) -> CmdResult<Stats> {
     let db = state.db.clone();
     blocking(move || {
-        db.stat_rows().map(|rows| stats::compute(&rows, chrono::Local::now().date_naive()))
+        db.stat_rows().map(|rows| stats::compute_days(&rows, chrono::Local::now().date_naive()))
     })
     .await?
     .map_err(|e| format!("统计失败：{}", any_err(e)))
